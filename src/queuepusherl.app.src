@@ -1,0 +1,33 @@
+{application, queuepusherl, [
+	{description, "Pushes messages from RabbitMQ to either SMTP or HTTP servers"},
+	{vsn, "0.1.0"},
+	{id, "queuepusherl"},
+	{env, [{rabbitmq_configs, [[
+				    {username, <<"guest">>},
+				    {password, <<"guest">>},
+				    {vhost, <<"/">>},
+				    {host, "localhost"},
+				    {port, 5672}]]},
+	       {rabbitmq_queue, <<"queuepusherl">>},
+	       {rabbitmq_exchange, <<"amq.direct">>},
+	       {retry_count, 10},
+	       {retry_initial_delay, 60000},
+	       {error_smtp, []}]},
+	{modules, []},
+	{registered, []},
+	{applications, [
+		kernel,
+		stdlib,
+		crypto,
+		asn1,
+		public_key,
+		ssl,
+		gen_smtp,
+		cowlib,
+		ranch,
+		gun,
+		amqp_client,
+		rabbit_common
+	]},
+	{mod, {queuepusherl_app, []}}
+]}.

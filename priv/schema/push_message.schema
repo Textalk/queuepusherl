@@ -1,0 +1,73 @@
+{
+    "title": "Push message",
+    "type": "object",
+    "definitions": {
+        "extemail": {
+            "type": "string",
+            "regexp": "^(.*<\S+@\S+>|\S+@\S+)$"
+        },
+        "extemailarray": {
+            "type": "array",
+            "items": { "$ref": "#/definitions/extemail" }
+        }
+    },
+    "oneOf": [
+        {
+            "properties": {
+                "type": { "enum": [ "smtp" ] },
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "mail": {
+                            "type": "object",
+                            "properties": {
+                                "from": { "$ref": "#/definitions/extemail" },
+                                "to": { "$ref": "#/definitions/extemailarray" },
+                                "cc": { "$ref": "#/definitions/extemailarray" },
+                                "bcc": { "$ref": "#/definitions/extemailarray" },
+                                "extra-headers": {
+                                    "type": "object",
+                                    "patternProperties": {
+                                        ".+": { "type": "string" }
+                                    }
+                                },
+                                "body": { "type": "string" }
+                            },
+                            "required": [ "from", "extra-headers", "body" ],
+                            "oneOf": [
+                                { "required": [ "to" ] },
+                                { "required": [ "cc" ] },
+                                { "required": [ "bcc" ] }
+                            ]
+                        },
+                        "smtp": {
+                            "type": "object",
+                            "properties": {
+                                "relay": { "type": "string" },
+                                "port": { "type": "number" },
+                                "username": { "type": "string" },
+                                "password": { "type": "string" }
+                            }
+                        },
+                        "error": {
+                            "type": "object",
+                            "properties": {
+                                "to": { "$ref": "#/definitions/extemail" },
+                                "subject": { "type": "string" },
+                                "body": { "type": "string" }
+                            }
+                        }
+                    },
+                    "required": [ "mail", "smtp", "error" ]
+                }
+            }
+        },
+        {
+            "properties": {
+                "type": { "enum": [ "http" ] },
+                "properties": {
+                }
+            }
+        }
+    ]
+}

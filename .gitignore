@@ -1,0 +1,8 @@
+*.sw?
+_rel/
+deps/
+relx
+Session.vim
+logs/
+*.beam
+.erlang.mk/
