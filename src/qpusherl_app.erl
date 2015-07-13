@@ -1,11 +1,11 @@
--module(queuepusherl_app).
+-module(qpusherl_app).
 -behaviour(application).
 
 -export([start/2]).
 -export([stop/1]).
 
 start(_Type, _Args) ->
-	queuepusherl_sup:start_link().
+	qpusherl_sup:start_link().
 
 stop(_State) ->
 	ok.

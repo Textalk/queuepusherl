@@ -1,7 +1,7 @@
 -module(mq_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include("queuepusherl_events.hrl").
+-include("qpusherl_events.hrl").
 -include("../deps/amqp_client/include/amqp_client.hrl").
 
 -export([all/0]).
@@ -61,23 +61,49 @@ end_per_testcase(_TestCase, Config) ->
     del_config(rabbitmq, Config).
 
 simple_test(Config) ->
-    meck:new(queuepusherl_app, [passthrough]),
-    meck:expect(queuepusherl_app, stop,
+    meck:new(qpusherl_app, [passthrough]),
+    meck:expect(qpusherl_app, stop,
                 fun (State) -> meck:passthrough([State]) end),
-    meck:new(queuepusherl_mq_listener, [passthrough]),
-    meck:expect(queuepusherl_mq_listener, handle_info,
-                fun (Info, State) ->
-                        ct:pal("Got message: ~p~n~p", [Info, State]),
-                        meck:passthrough([Info, State])
+    %meck:new(qpusherl_mq_listener, [passthrough]),
+    %meck:expect(qpusherl_mq_listener, handle_info,
+                %fun (Info, State) ->
+                        %ct:pal("Got message: ~p~n~p", [Info, State]),
+                        %meck:passthrough([Info, State])
+                %end),
+    %meck:expect(qpusherl_mq_listener, terminate,
+              %fun (Reason, State) -> meck:passthrough([Reason, State]) end),
+    meck:new(gen_smtp_client),
+    meck:expect(gen_smtp_client, send_blocking,
+                fun (Mail, _Smtp) ->
+                        ct:pal("Send e-mail: ~p", [Mail]),
+                        <<>>
                 end),
-    meck:expect(queuepusherl_mq_listener, terminate,
-              fun (Reason, State) -> meck:passthrough([Reason, State]) end),
     {ok, Started} = application:ensure_all_started(queuepusherl),
     ct:pal("Started apps: ~p", [Started]),
-    meck:wait(queuepusherl_mq_listener, handle_info, '_', 5000),
+    %meck:wait(qpusherl_mq_listener, handle_info, '_', 5000),
     case get_config(rabbitmq, Config) of
         {_Connection, Channel, Exchange, Queue} ->
-            Payload = <<"{\"type\":\"smtp\",\"data\":{}}">>,
+            Payload = jiffy:encode(#{
+                        type => smtp,
+                        data => #{
+                          mail => #{
+                            from => <<"Apa Bepa <apa@bepa.baz>">>,
+                            to => [<<"apa@cepa.baz">>],
+                            body => <<"This is an email">>
+                           },
+                          smtp => #{
+                            relay => <<"">>,
+                            port => 25,
+                            username => <<"">>,
+                            password => <<"">>
+                           },
+                          error => #{
+                            to => <<"admin@bepa.baz">>,
+                            subject => <<"Error">>,
+                            body => <<"Error e-mail body">>
+                           }
+                         }
+                       }),
             Publish = #'basic.publish'{exchange = Exchange, routing_key = Queue},
             amqp_channel:cast(Channel, Publish, #amqp_msg{payload = Payload});
         _ ->
@@ -87,16 +113,17 @@ simple_test(Config) ->
     receive
         continue -> ok
     end,
-    meck:wait(queuepusherl_mq_listener, handle_info, '_', 5000),
+    meck:wait(gen_smtp_client, send_blocking, '_', 5000),
     %ok = application:stop(queuepusherl),
     ct:pal("Stopping all applications~n"),
     [ catch application:stop(App) || App <- lists:reverse(Started) ],
     ct:pal("Applications stopping.", []),
-    %meck:wait(queuepusherl_mq_listener, terminate, '_', 5000),
-    meck:wait(queuepusherl_app, stop, '_', 5000),
+    %meck:wait(qpusherl_mq_listener, terminate, '_', 5000),
+    meck:wait(qpusherl_app, stop, '_', 5000),
     ct:pal("All applications stopped.", []),
-    ok = meck:unload(queuepusherl_mq_listener),
-    ok = meck:unload(queuepusherl_app),
+    %ok = meck:unload(qpusherl_mq_listener),
+    %ok = meck:unload(qpusherl_app),
+    %ok = meck:unload(gen_smtp_client),
     ok.
 
 add_config(Key, Value, Config) ->

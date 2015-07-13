@@ -1,7 +1,7 @@
 -module(smtp_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include("queuepusherl_events.hrl").
+-include("qpusherl_events.hrl").
 
 -export([all/0]).
 -export([init_per_testcase/2, end_per_testcase/2]).
@@ -85,24 +85,24 @@ send_email(_Config) ->
              []           % errors
              },
     ?assertMatch({stop, normal, _},
-                 queuepusherl_smtp_worker:handle_info(retry, State)),
+                 qpusherl_smtp_worker:handle_info(retry, State)),
 
     ?assertEqual(1, meck:num_calls(gen_smtp_client, send_blocking, '_')),
 
     meck:unload(gen_smtp_client).
 
 parse_event(_Config) ->
-    ?assertMatch({ok, {smtp, {{_, _, _}, _, _}}},  queuepusherl_event:parse(?MAIL_JSON)),
+    ?assertMatch({ok, {smtp, {{_, _, _}, _, _}}},  qpusherl_event:parse(?MAIL_JSON)),
     ok.
 
 failed_parse(_Config) ->
-    ?assertMatch({error, _, _}, queuepusherl_event:parse(?MAIL_BAD_JSON)),
-    ?assertMatch({error, {error, {_, truncated_json}}, _}, queuepusherl_event:parse(<<"{">>)),
+    ?assertMatch({error, _, _}, qpusherl_event:parse(?MAIL_BAD_JSON)),
+    ?assertMatch({error, {error, {_, truncated_json}}, _}, qpusherl_event:parse(<<"{">>)),
     ok.
 
 bad_email(_Config) ->
     ?assertThrow({invalid_email, <<"foo">>},
-                 queuepusherl_smtp_event:parse(#{
+                 qpusherl_smtp_event:parse(#{
                    <<"mail">> => #{
                        <<"from">> => <<"foo">>,
                        <<"body">> => <<"mail body">>

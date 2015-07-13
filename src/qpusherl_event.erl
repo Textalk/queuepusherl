@@ -1,8 +1,8 @@
--module(queuepusherl_event).
+-module(qpusherl_event).
 
 -export([parse/1]).
 
--include("queuepusherl_events.hrl").
+-include("qpusherl_events.hrl").
 
 -spec parse(binary()) -> {ok, event()} | {error, term()}.
 parse(BinaryEvent) ->
@@ -11,7 +11,7 @@ parse(BinaryEvent) ->
         case {maps:get(<<"type">>, EventMap),
               maps:get(<<"data">>, EventMap)} of
             {<<"smtp">>, Data} ->
-                {ok, SmtpEvent} = queuepusherl_smtp_event:parse(Data),
+                {ok, SmtpEvent} = qpusherl_smtp_event:parse(Data),
                 {smtp, SmtpEvent}
         end
     of

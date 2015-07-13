@@ -1,8 +1,8 @@
--module(queuepusherl_smtp_worker).
+-module(qpusherl_smtp_worker).
 -behaviour(gen_server).
 
 %% API.
--export([start_link/0]).
+-export([start_link/1]).
 
 %% gen_server.
 -export([init/1]).
@@ -13,7 +13,7 @@
 -export([code_change/3]).
 
 -record(state, {
-          event           :: queuepusherl_event:event(),
+          event           :: qpusherl_event:event(),
           retry_count = 0 :: non_neg_integer(),
           max_retries     :: non_neg_integer() | infinity,
           initial_delay   :: non_neg_integer(),
@@ -22,20 +22,21 @@
 
 %% API.
 
-%-spec start_link(Event :: queuepusherl_event:event()) -> {ok, pid()} | {error, term()}.
+%-spec start_link(Event :: qpusherl_event:event()) -> {ok, pid()} | {error, term()}.
 %start_link(Event) ->
--spec start_link() -> {ok, pid()} | {error, term()}.
-start_link() ->
-    ct:pal("Init~n", []),
-	gen_server:start_link(?MODULE, [], []).
+-spec start_link(term()) -> {ok, pid()} | {error, term()}.
+start_link(Event) ->
+    ct:pal("Start link ~p~n", [Event]),
+	gen_server:start_link(?MODULE, [Event], []).
 
 %% gen_server.
 
 init([Event]) ->
+    ct:pal("Init worker! ~p", [Event]),
     State = #state{
                event = Event,
-               max_retries = application:get_env(queuepusherl, smtp_retry_count, 10),
-               initial_delay = application:get_env(queuepusherl, smtp_retry_initial_delay, 60000)
+               max_retries = application:get_env(qpusherl, smtp_retry_count, 10),
+               initial_delay = application:get_env(qpusherl, smtp_retry_initial_delay, 60000)
               },
     self() ! retry,
 	{ok, State}.
@@ -57,8 +58,8 @@ make_mail_error(Name, Msg) ->
     <<"{ ", BinName/binary, ": ", BinMsg/binary, " }">>.
 
 handle_info(retry, State = #state{event = Event, errors = Errors}) ->
-    Mail = queuepusherl_smtp_event:get_mail(Event),
-    Smtp = queuepusherl_smtp_event:get_smtp_options(Event),
+    Mail = qpusherl_smtp_event:get_mail(Event),
+    Smtp = qpusherl_smtp_event:get_smtp_options(Event),
     case gen_smtp_client:send_blocking(Mail, Smtp) of
         Receipt when is_binary(Receipt) ->
             {stop, normal, State};
@@ -99,8 +100,8 @@ dispatch_retry(State = #state{retry_count = RetryCount,
     {stop, normal, State}.
 
 send_error_mail(#state{event = Event, errors = Errors}) ->
-    {ok, ErrorSmtp} = application:get_env(queuepusherl, error_smtp),
-    ErrorMail = queuepusherl_event:build_error_mail(Event, Errors),
+    {ok, ErrorSmtp} = application:get_env(qpusherl, error_smtp),
+    ErrorMail = qpusherl_event:build_error_mail(Event, Errors),
     case gen_smtp_client:send_blocking(ErrorMail, ErrorSmtp) of
         Receipt when is_binary(Receipt) ->
             ok;

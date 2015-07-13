@@ -1,4 +1,4 @@
--module(queuepusherl_mq_listener).
+-module(qpusherl_mq_listener).
 -behaviour(gen_server).
 
 %% API.
@@ -13,7 +13,7 @@
 -export([code_change/3]).
 
 -include_lib("amqp_client/include/amqp_client.hrl").
--include("queuepusherl_events.hrl").
+-include("qpusherl_events.hrl").
 
 -define(RECONNECT_TIMEOUT, 10000).
 -define(SUBSCRIPTION_TIMEOUT, 10000).
@@ -28,18 +28,15 @@
 
 -spec start_link() -> {ok, pid()} | ignore | {error, term()}.
 start_link() ->
-    ct:pal("Starting mq listener", []),
+    io:format("Starting mq listener", []),
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %% gen_server.
 
 init([]) ->
-    ct:pal("Init mq", []),
+    io:format("Init mq", []),
     self() ! connect,
-	{ok, #state{}};
-init(Other) ->
-    ct:pal("Other: ~p", [Other]),
-    {error, <<"No such thing">>}.
+	{ok, #state{}}.
 
 handle_call(_Request, _From, State) ->
 	{reply, ignored, State}.
@@ -48,10 +45,12 @@ handle_cast(_Msg, State) ->
 	{noreply, State}.
 
 -spec create_worker({atom(), term()}) -> {'ok', pid()}.
-create_worker({smtp, Event}) ->
-    queuepusherl_smtp_sup:create_child(Event);
-create_worker({http, Event}) ->
-    queuepusherl_http_sup:create_child(Event).
+create_worker({smtp, _Event}) ->
+    %qpusherl_smtp_sup:create_child(Event);
+    ok;
+create_worker({http, _Event}) ->
+    %qpusherl_http_sup:create_child(Event).
+    ok.
 
 % @doc Handle incoming messages from system and RabbitMQ.
 handle_info({'DOWN', _MRef, process, Worker, Reason},
@@ -70,8 +69,8 @@ handle_info({'DOWN', _MRef, process, Worker, Reason},
     end;
 handle_info(connect, #state{connection = undefined} = State) ->
     % Setup connection to RabbitMQ and connect.
-    {ok, RabbitConfigs} = application:get_env(queuepusherl, rabbitmq_configs),
-    ct:pal("Connect~n"),
+    {ok, RabbitConfigs} = application:get_env(qpusherl, rabbitmq_configs),
+    io:format("Connect~n"),
     case connect(RabbitConfigs) of
         {ok, Connection} ->
             link(Connection),
@@ -85,15 +84,15 @@ handle_info(connect, #state{connection = undefined} = State) ->
     end;
 handle_info({#'basic.deliver'{delivery_tag = Tag}, #amqp_msg{payload = Payload}},
             #state{workers = Workers0} = State) ->
-    ct:pal("Getting message: ~p", [Payload]),
+    io:format("Getting message: ~p", [Payload]),
     % Handles incoming messages from RabbitMQ.
-    case queuepusherl_event:parse(Payload) of
+    case qpusherl_event:parse(Payload) of
         {ok, Event} ->
             {ok, Pid} = create_worker(Event),
             Workers1 = dict:store(Pid, {Tag, Event}, Workers0),
             {noreply, State#state{workers = Workers1}};
         {error, Reason, _} ->
-            error_logger:error_msg("Invalid queuepusherl message:~n"
+            error_logger:error_msg("Invalid qpusherl message:~n"
                                    "Payload: ~p~n"
                                    "Reason: ~p~n"
                                    "Trace: ~p~n",
@@ -110,7 +109,7 @@ handle_info(Info, State) ->
 	{noreply, State}.
 
 terminate(_Reason, #state{connection = Connection, channel = Channel}) ->
-    ct:pal("Shutdown message queue processor", []),
+    io:format("Shutdown message queue processor", []),
     catch amqp_channel:close(Channel),
     catch amqp_connection:close(Connection),
 	ok.
@@ -150,8 +149,8 @@ connect([]) ->
 
 setup_subscription(ChannelPid) ->
     %% Queue settings
-    {ok, Queue}    = application:get_env(queuepusherl, rabbitmq_queue),
-    {ok, Exchange} = application:get_env(queuepusherl, rabbitmq_exchange),
+    {ok, Queue}    = application:get_env(qpusherl, rabbitmq_queue),
+    {ok, Exchange} = application:get_env(qpusherl, rabbitmq_exchange),
 
     %% We use the same name for the routing key as the queue name
     RoutingKey = Queue,

@@ -1,11 +1,11 @@
--module(queuepusherl_smtp_event).
+-module(qpusherl_smtp_event).
 
 -export([parse/1]).
 -export([build_error_mail/2]).
 -export([get_mail/1]).
 -export([get_smtp_options/1]).
 
--include("queuepusherl_events.hrl").
+-include("qpusherl_events.hrl").
 
 -spec parse(map()) -> {ok, mailevent(), smtp(), mailerror()} | {error, Reason :: binary()}.
 parse(#{<<"mail">> := MailInfo,
@@ -51,7 +51,7 @@ build_mail(MailInfo) ->
 build_error_mail(#mailevent{error = #mailerror{to = To, subject = Subject, body = Body},
                             mail = {_, _, OrigMail}},
                 Errors) ->
-    {ok, ErrorFrom} = application:get_env(queuepusherl, error_from),
+    {ok, ErrorFrom} = application:get_env(qpusherl, error_from),
     MessagePart = {<<"text">>, <<"plain">>, [], [], Body},
     ErrorsPart = {<<"text">>, <<"plain">>, [], [], join(Errors)},
 

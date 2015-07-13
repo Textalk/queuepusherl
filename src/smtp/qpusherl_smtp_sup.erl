@@ -1,4 +1,4 @@
--module(queuepusherl_smtp_sup).
+-module(qpusherl_smtp_sup).
 -behaviour(supervisor).
 
 -export([start_link/0]).
@@ -10,12 +10,12 @@ start_link() ->
 
 init([]) ->
     Procs = [
-             {queuepusherl_smtp_worker, % id
-              {queuepusherl_smtp_worker, start_link, []}, % start
+             {qpusherl_smtp_worker, % id
+              {qpusherl_smtp_worker, start_link, []}, % start
               transient, % restart
               5000, % shutdown
               worker, % type
-              [queuepusherl_smtp_worker] % modules
+              [qpusherl_smtp_worker] % modules
              }
             ],
     {ok, {{simple_one_for_one, % strategy

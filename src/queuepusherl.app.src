@@ -29,5 +29,5 @@
 		amqp_client,
 		rabbit_common
 	]},
-	{mod, {queuepusherl_app, []}}
+	{mod, {qpusherl_app, []}}
 ]}.

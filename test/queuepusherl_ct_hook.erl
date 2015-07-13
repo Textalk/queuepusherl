@@ -1,4 +1,4 @@
--module(queuepusherl_ct_hook).
+-module(qpusherl_ct_hook).
 
 -export([id/1]).
 -export([init/2]).
@@ -9,7 +9,7 @@
 -record(state, {}).
 
 id(Opts) ->
-    proplists:get_value(filename, Opts, "/tmp/queuepusherl_ct_hooks.log").
+    proplists:get_value(filename, Opts, "/tmp/qpusherl_ct_hooks.log").
 
 init(_Id, _Opts) ->
     {ok, #state{}}.
