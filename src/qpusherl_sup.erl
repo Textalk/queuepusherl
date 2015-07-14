@@ -8,6 +8,7 @@ start_link() ->
 	supervisor:start_link({local, qpusherl}, ?MODULE, []).
 
 init([]) ->
+    lager:info("Queuepusherl supervisor started!"),
     Procs = [
              {qpusherl_smtp, % id 
               {qpusherl_smtp_sup, start_link, []}, % start 

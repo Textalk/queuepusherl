@@ -1,20 +1,46 @@
 -module(qpusherl_smtp_event).
 
 -export([parse/1]).
--export([build_error_mail/2]).
+-export([add_error/2]).
 -export([get_mail/1]).
+-export([get_error_mail/1]).
 -export([get_smtp_options/1]).
 
--include("qpusherl_events.hrl").
+-record(mail, {from :: binary(),
+               to :: [binary()],
+               body :: binary()}).
+-type mail() :: #mail{}.
 
--spec parse(map()) -> {ok, mailevent(), smtp(), mailerror()} | {error, Reason :: binary()}.
+-record(smtp, {relay :: binary(),
+               port :: integer(),
+               username :: binary(),
+               password :: binary()}).
+-type smtp() :: #smtp{}.
+
+-record(mailerror, {to :: binary(),
+                    subject :: binary(),
+                    body :: binary(),
+                    errors = [] :: [{atom(), binary()}]}).
+-type mailerror() :: #mailerror{}.
+
+-type extern_mail() :: {From :: binary(),
+                        To :: [binary()],
+                        Body :: binary()}.
+
+-record(smtp_event, {mail :: mail(),
+                     smtp :: smtp(),
+                     error :: mailerror()}).
+-opaque smtp_event() :: #smtp_event{}.
+-export_type([smtp_event/0]).
+
+-spec parse(map()) -> {ok, mail()} | {error, Reason :: binary()}.
 parse(#{<<"mail">> := MailInfo,
         <<"smtp">> := SmtpInfo,
         <<"error">> := MailErrorInfo}) ->
     Mail = build_mail(MailInfo),
     Smtp = build_smtp(SmtpInfo),
     Error = build_error(MailErrorInfo),
-    {ok, {Mail, Smtp, Error}}.
+    {ok, #smtp_event{mail = Mail, smtp = Smtp, error = Error}}.
 
 -spec build_mail(map()) -> mail().
 build_mail(MailInfo) ->
@@ -43,15 +69,39 @@ build_mail(MailInfo) ->
                end,
     MailFrom = extract_email_address(From),
     RcptTo = lists:map(fun extract_email_address/1, To ++ Cc ++ Bcc),
-    Email = mimemail:encode({<<"text">>, <<"plain">>, Headers3, [], Body}),
+    Mail = mimemail:encode({<<"text">>, <<"plain">>, Headers3, [], Body}),
 
-    {MailFrom, RcptTo, Email}.
+    #mail{from = MailFrom, to = RcptTo, body = Mail}.
 
--spec build_error_mail(mailevent(), [{atom(), binary()}]) -> mail().
-build_error_mail(#mailevent{error = #mailerror{to = To, subject = Subject, body = Body},
-                            mail = {_, _, OrigMail}},
-                Errors) ->
-    {ok, ErrorFrom} = application:get_env(qpusherl, error_from),
+-spec build_smtp(map()) -> smtp().
+build_smtp(SmtpInfo) ->
+    Relay = maps:get(<<"relay">>, SmtpInfo),
+    Port = maps:get(<<"port">>, SmtpInfo),
+    Username = maps:get(<<"username">>, SmtpInfo),
+    Password = maps:get(<<"password">>, SmtpInfo),
+    true = is_binary(Relay) or (Relay == undefined),
+    true = is_integer(Port) or (Port == undefined),
+    true = is_binary(Username) or (Username == undefined),
+    true = is_binary(Password) or (Password == undefined),
+    #smtp{relay = Relay, port = Port, username = Username, password = Password}.
+
+-spec build_error(map()) -> mailerror().
+build_error(ErrorInfo) ->
+    To = maps:get(<<"to">>, ErrorInfo),
+    Subject = maps:get(<<"subject">>, ErrorInfo),
+    Body = maps:get(<<"body">>, ErrorInfo),
+    true = is_binary(To),
+    true = is_binary(Subject),
+    true = is_binary(Body),
+    #mailerror{to = To, subject = Subject, body = Body}.
+
+-spec get_error_mail(smtp_event()) -> extern_mail().
+get_error_mail(#smtp_event{mail = {_, _, OrigMail},
+                           error = #mailerror{to = To,
+                                              subject = Subject,
+                                              body = Body,
+                                              errors = Errors}}) ->
+    {ok, ErrorFrom} = application:get_env(queuepusherl, error_from),
     MessagePart = {<<"text">>, <<"plain">>, [], [], Body},
     ErrorsPart = {<<"text">>, <<"plain">>, [], [], join(Errors)},
 
@@ -69,43 +119,31 @@ build_error_mail(#mailevent{error = #mailerror{to = To, subject = Subject, body 
                                  [MessagePart, ErrorsPart, Attachement]}),
     {extract_email_address(ErrorFrom), [extract_email_address(To)], ErrorMail}.
 
--spec build_smtp(map()) -> smtp().
-build_smtp(#{<<"relay">> := Relay,
-             <<"port">> := Port,
-             <<"username">> := Username,
-             <<"password">> := Password}) ->
-    true = is_binary(Relay) or (Relay == undefined),
-    true = is_integer(Port) or (Port == undefined),
-    true = is_binary(Username) or (Username == undefined),
-    true = is_binary(Password) or (Password == undefined),
-    #smtpoptions{relay = Relay, port = Port, username = Username, password = Password};
-build_smtp(undefined) ->
-    #smtpoptions{}.
-
--spec build_error(map()) -> mailerror().
-build_error(#{<<"to">> := To,
-              <<"subject">> := Subject,
-              <<"body">> := Body}) ->
-    true = is_binary(To),
-    true = is_binary(Subject),
-    true = is_binary(Body),
-    #mailerror{to = To, subject = Subject, body = Body}.
-
-get_mail(#mailevent{mail = Mail}) ->
-    Mail.
+-spec get_mail(smtp_event()) -> extern_mail().
+get_mail(#smtp_event{mail = #mail{from = From,
+                                  to = To,
+                                  body = Body}}) ->
+    {From, To, Body}.
 
 %% @doc Returns a proplist that can be used as the 2nd argument to
 %% gen_smtp_client:send/2,3 and gen_smtp_client:send_blocking/2.
--spec get_smtp_options(event()) -> [{atom(), term()}].
-get_smtp_options(#mailevent{smtp = #smtpoptions{
-                                      relay = Relay,
-                                      port = Port,
-                                      username = User,
-                                      password = Pass}}) ->
+-spec get_smtp_options(smtp_event()) -> [{atom(), term()}].
+get_smtp_options(#smtp_event{smtp = #smtp{relay = Relay,
+                                          port = Port,
+                                          username = User,
+                                          password = Password}}) ->
     [{relay, Relay} || Relay /= undefined] ++
     [{port, Port}  || Port /= undefined] ++
     [{username, User} || User /= undefined] ++
-    [{password, Pass} || Pass /= undefined].
+    [{password, Password} || Password /= undefined].
+
+-spec add_error(smtp_event(), {atom(), binary()}) -> smtp_event().
+add_error(#smtp_event{error = #mailerror{errors = Errors} = MailError} = Event, {Tag, Msg}) ->
+    Event#smtp_event{error = MailError#mailerror{errors = [{Tag, Msg}|Errors]}}.
+
+%% ------------------------------------------------------------------------------------------------
+%% Helper functions
+%% ------------------------------------------------------------------------------------------------
 
 %% @doc Returns a binary on the form `<<"<email@example.com>">>'.
 -spec extract_email_address(binary()) -> binary().

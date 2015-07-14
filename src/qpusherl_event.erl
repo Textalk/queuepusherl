@@ -2,7 +2,7 @@
 
 -export([parse/1]).
 
--include("qpusherl_events.hrl").
+-type event() :: term().
 
 -spec parse(binary()) -> {ok, event()} | {error, term()}.
 parse(BinaryEvent) ->

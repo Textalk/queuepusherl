@@ -3,12 +3,13 @@
 
 -export([start_link/0]).
 -export([init/1]).
--export([create_child/1]).
+-export([create_child/2]).
 
 start_link() ->
 	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
+    lager:info("SMTP supervisor started!"),
     Procs = [
              {qpusherl_smtp_worker, % id
               {qpusherl_smtp_worker, start_link, []}, % start
@@ -28,7 +29,6 @@ init([]) ->
 
 %% API functions, called outside of the process
 
-create_child(Event) ->
-    {ok, Pid} = supervisor:start_child(?MODULE, [Event]),
-    monitor(process, Pid),
-    {ok, Pid}.
+-spec create_child(pid(), qpusherl_smtp_event:smtp_event()) -> {'ok', pid()}.
+create_child(Owner, Event) ->
+    supervisor:start_child(?MODULE, [Owner, Event]).
