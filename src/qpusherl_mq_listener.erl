@@ -18,41 +18,41 @@
 -define(SUBSCRIPTION_TIMEOUT, 10000).
 
 -record(state, {
-          connection           :: {pid(), term()} | undefined,
-          channel              :: {pid(), term()} | undefined,
-          workers = dict:new() :: dict:dict(pid(), integer())
+          connection        :: {pid(), term()} | undefined,
+          channel           :: {pid(), term()} | undefined,
+          tags = sets:new() :: sets:set(integer())
          }).
 
 %% API.
 
 -spec start_link() -> {ok, pid()} | ignore | {error, term()}.
 start_link() ->
-	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %% gen_server.
 
 init([]) ->
     lager:info("Message queue listener started!"),
     self() ! connect,
-	{ok, #state{}}.
+    {ok, #state{}}.
 
 terminate(Reason, #state{connection = {Connection, _}, channel = {Channel, _}}) ->
-    lager:info("Message queue listener stopped: ~p~n", [Reason]),
+    lager:warning("Message queue listener stopped: ~p~n", [Reason]),
     catch amqp_channel:close(Channel),
     catch amqp_connection:close(Connection),
-	ok.
+    ok.
 
 handle_call(_Request, _From, State) ->
-	{reply, ignored, State}.
+    {reply, ignored, State}.
 
 handle_cast(_Msg, State) ->
-	{noreply, State}.
+    {noreply, State}.
 
--spec create_worker({atom(), term()}) -> {'ok', pid()}.
-create_worker({smtp, Event}) ->
-    qpusherl_smtp_sup:create_child(self(), Event);
-create_worker({http, _Event}) ->
-    %qpusherl_http_sup:create_child(self(), Event).
+-spec create_worker(integer(), {atom(), term()}) -> {'ok', pid()}.
+create_worker(Tag, {smtp, Event}) ->
+    qpusherl_smtp_sup:create_child(self(), Tag, Event);
+create_worker(_Tag, {http, _Event}) ->
+    %qpusherl_http_sup:create_child(self(), Tag, Event).
     {ok, no_pid}.
 
 % @doc Handle incoming messages from system and RabbitMQ.
@@ -61,11 +61,10 @@ handle_info({'DOWN', MRef, process, _Worker, Reason},
       MRef == ConM; MRef == ChanM ->
     lager:error("RabbitMQ connection or channel is down: ~p~n", [Reason]),
     {stop, rabbitmq_down, State#state{connection = undefined, channel = undefined}};
-handle_info({mail_sent, Worker}, State = #state{workers = Workers}) ->
-    Tag = dict:fetch(Worker, Workers),
+handle_info({mail_sent, Tag}, State = #state{tags = Tags}) ->
     send_ack(Tag, State),
     lager:info("Mail event has been acked!"),
-    State1 = State#state{workers = dict:erase(Worker, Workers)},
+    State1 = State#state{tags = sets:del_element(Tag, Tags)},
     {noreply, State1};
 handle_info(connect, #state{connection = undefined} = State) ->
     % Setup connection to RabbitMQ and connect.
@@ -84,14 +83,13 @@ handle_info(connect, #state{connection = undefined} = State) ->
             {noreply, State}
     end;
 handle_info({#'basic.deliver'{delivery_tag = Tag}, #amqp_msg{payload = Payload}},
-            #state{workers = Workers0} = State) ->
+            #state{tags = Tags} = State) ->
     lager:debug("Getting message: ~p~n", [non]),
     % Handles incoming messages from RabbitMQ.
     case qpusherl_event:parse(Payload) of
         {ok, Event} ->
-            {ok, Pid} = create_worker(Event),
-            Workers1 = dict:store(Pid, Tag, Workers0),
-            {noreply, State#state{workers = Workers1}};
+            {ok, _Pid} = create_worker(Tag, Event),
+            {noreply, State#state{tags = sets:add_element(Tag, Tags)}};
         {error, Reason, _} ->
             lager:error("Invalid qpusherl message:~n"
                         "Payload: ~p~n"
@@ -113,10 +111,10 @@ handle_info(#'basic.cancel'{}, State) ->
 handle_info(Info, State) ->
     % Some other message to the server pid.
     lager:warning("~p ignoring info ~p", [?MODULE, Info]),
-	{noreply, State}.
+    {noreply, State}.
 
 code_change(_OldVsn, State, _Extra) ->
-	{ok, State}.
+    {ok, State}.
 
 send_ack(Tag, #state{channel = {Channel, _}}) ->
     Ack = #'basic.ack'{delivery_tag = Tag},
@@ -167,7 +165,7 @@ setup_subscription(ChannelPid) ->
     %% Setup the subscription
     Subscription = #'basic.consume'{queue = Queue},
     #'basic.consume_ok'{consumer_tag = Tag} =
-        amqp_channel:subscribe(ChannelPid, Subscription, self()),
+    amqp_channel:subscribe(ChannelPid, Subscription, self()),
     receive
         #'basic.consume_ok'{consumer_tag = Tag} -> ok
     after

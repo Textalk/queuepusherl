@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 %% API.
--export([start_link/2]).
+-export([start_link/1]).
 
 %% gen_server.
 -export([init/1]).
@@ -14,6 +14,7 @@
 
 -record(state, {
           owner           :: pid(),
+          tag             :: integer(),
           event           :: qpusherl_event:event(),
           retry_count = 0 :: non_neg_integer(),
           max_retries     :: non_neg_integer() | infinity,
@@ -25,16 +26,17 @@
 
 %-spec start_link(Event :: qpusherl_event:event()) -> {ok, pid()} | {error, term()}.
 %start_link(Event) ->
--spec start_link(pid(), qpusherl_smtp_event:smtp_event()) -> {ok, pid()} | {error, term()}.
-start_link(Owner, Event) ->
-	gen_server:start_link(?MODULE, [Owner, Event], []).
+-spec start_link([term()]) -> {ok, pid()} | {error, term()}.
+start_link(Args) ->
+	gen_server:start_link(?MODULE, Args, []).
 
 %% gen_server.
 
-init([Owner, Event]) ->
+init([Owner, Tag, Event]) ->
     lager:info("SMTP worker started! (~p)", [self()]),
     State = #state{
                owner = Owner,
+               tag = Tag,
                event = Event,
                max_retries = application:get_env(queuepusherl, smtp_retry_count, 10),
                initial_delay = application:get_env(queuepusherl, smtp_retry_initial_delay, 60000)
@@ -58,12 +60,12 @@ handle_cast(_Msg, _State) ->
     %BinName = atom_to_binary(Name, utf8),
     %<<"{ ", BinName/binary, ": ", BinMsg/binary, " }">>.
 
-handle_info(retry, State = #state{owner = Owner}) ->
+handle_info(retry, State = #state{owner = Owner, tag = Tag}) ->
     lager:info("Trying to send mail (~p)", [self()]),
     case send_mail(State) of
         {done, State1} ->
-            Owner ! {mail_sent, self()},
-            lager:info("Mail sent! (~p)", [self()]),
+            Owner ! {mail_sent, Tag},
+            lager:notice("Mail sent! (~p)", [self()]),
             {stop, normal, State1};
         {retry, State1} ->
             dispatch_retry(State1)
@@ -98,9 +100,15 @@ send_mail(State = #state{event = Event}) ->
     Smtp = qpusherl_smtp_event:get_smtp_options(Event),
     lager:debug("send_mail(~p = #state{event = ~p})~nMail: ~p~nSmtp: ~p~n", [State, Event, Mail,
                                                                            Smtp]),
-    timer:send_after(timer:seconds(1), timeout),
-    receive timeout -> ok end,
-    {done, State}.
+    {A, B, C} = erlang:now(),
+    N = (A + B + C) rem 3,
+    lager:info("Got random: ~p", [N]),
+    case N of
+        0 -> exit({no_reason, "Just don't feel like it!"});
+        N -> timer:send_after(timer:seconds(3), timeout),
+             receive timeout -> ok end,
+             {done, State}
+    end.
     %case gen_smtp_client:send_blocking(Mail, Smtp) of
         %Receipt when is_binary(Receipt) ->
             %{done, State};

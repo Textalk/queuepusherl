@@ -3,7 +3,7 @@
 
 -export([start_link/0]).
 -export([init/1]).
--export([create_child/2]).
+-export([create_child/3]).
 
 start_link() ->
 	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
@@ -20,7 +20,7 @@ init([]) ->
              }
             ],
     {ok, {{simple_one_for_one, % strategy
-           1, % intensity
+           3, % intensity
            10 % period
           },
           Procs
@@ -29,6 +29,6 @@ init([]) ->
 
 %% API functions, called outside of the process
 
--spec create_child(pid(), qpusherl_smtp_event:smtp_event()) -> {'ok', pid()}.
-create_child(Owner, Event) ->
-    supervisor:start_child(?MODULE, [Owner, Event]).
+-spec create_child(pid(), integer(), qpusherl_smtp_event:smtp_event()) -> {'ok', pid()}.
+create_child(Owner, Tag, Event) ->
+    supervisor:start_child(?MODULE, [[Owner, Tag, Event]]).
