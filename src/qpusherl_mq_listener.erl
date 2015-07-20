@@ -17,6 +17,7 @@
 -define(RECONNECT_TIMEOUT, 10000).
 -define(SUBSCRIPTION_TIMEOUT, 10000).
 -define(REQUEUE_TIMEOUT, 10000).  % If a process fails, how long should it wait before trying again.
+-define(MAX_REQUEUES, 3).
 
 -record(state, {
           connection              :: {pid(), term()} | undefined,
@@ -88,7 +89,7 @@ handle_info({'DOWN', _MRef, process, Worker, Reason},
 handle_info({event_finished, Worker}, State = #state{workers = Workers, oldworkers = OldWorkers}) ->
     case maps:find(Worker, Workers) of
         {ok, Tag} -> send_ack(Tag, State),
-                     lager:info("Event has been acked! (~p)", [Worker]),
+                     lager:notice("Event has been acked! (~p :: ~p)", [Tag, Worker]),
                      {noreply, State#state{workers = maps:remove(Worker, Workers),
                                            oldworkers = sets:add_element(Worker, OldWorkers)}};
         error -> {noreply, State}
@@ -109,22 +110,33 @@ handle_info(connect, #state{connection = undefined} = State) ->
             erlang:send_after(?RECONNECT_TIMEOUT, self(), connect),
             {noreply, State}
     end;
-handle_info({#'basic.deliver'{delivery_tag = Tag}, #amqp_msg{payload = Payload}},
-            #state{workers = Workers} = State) ->
+handle_info({#'basic.deliver'{delivery_tag = Tag},
+             #amqp_msg{props = #'P_basic'{headers = AmqpHeaders},
+                       payload = Payload}},
+            State = #state{workers = Workers}) ->
     %% Handles incoming messages from RabbitMQ.
-    lager:info("Getting message: ~p~n", [Tag]),
-    case qpusherl_event:parse(Payload) of
+    {ok, WorkQueue} = application:get_env(queuepusherl, rabbitmq_queue),
+    Headers = simplify_amqp_headers(AmqpHeaders),
+    Retries = amqp_headers_count_retries(Headers, WorkQueue, <<"rejected">>),
+    lager:notice("Processing new message: ~p (retry: ~p)~n", [Tag, Retries]),
+    case Retries =< ?MAX_REQUEUES andalso qpusherl_event:parse(Payload) of
         {ok, Event} ->
-            {ok, Pid} = create_worker(Tag, Event),
-            monitor(process, Pid),
-            Pid ! retry,
-            {noreply, State#state{workers = maps:put(Pid, Tag, Workers)}};
+            {ok, Worker} = create_worker(Tag, Event),
+            lager:notice("Started new worker! (~p :: ~p)", [Tag, Worker]),
+            monitor(process, Worker),
+            Worker ! retry,
+            {noreply, State#state{workers = maps:put(Worker, Tag, Workers)}};
         {error, Reason, _} ->
             lager:error("Invalid qpusherl message:~n"
                         "Payload: ~p~n"
                         "Reason: ~p~n"
                         "Trace: ~p~n",
                         [Payload, Reason, erlang:get_stacktrace()]),
+            send_ack(Tag, State),
+            {noreply, State};
+        false ->
+            lager:error("Could not execute event ~p, retried too many times: ~n~p~nPayload: ~s",
+                        [Tag, Headers, Payload]),
             send_ack(Tag, State),
             {noreply, State}
     end;
@@ -149,10 +161,6 @@ send_return(Tag, #state{channel = {Channel, _}}) ->
     lager:notice("Message ~p delayed for further retry.", [Tag]),
     Reject = #'basic.reject'{delivery_tag = Tag, requeue = false},
     amqp_channel:call(Channel, Reject).
-    %Publish = #'basic.publish'{routing_key = <<"queuepusherl">>,
-                               %exchange = <<"queuepusherl_dead_exchange">>},
-    %NewMsg = #amqp_msg{payload = <<"This is a test">>},
-    %amqp_channel:cast(Channel, Publish, NewMsg).
 
 send_ack(Tag, #state{channel = {Channel, _}}) ->
     Ack = #'basic.ack'{delivery_tag = Tag},
@@ -255,3 +263,33 @@ setup_subscription(Channel, #subscription_info{queue = Queue,
             end;
         true -> ok
     end.
+
+simplify_amqp_headers(undefined) ->
+    undefined;
+simplify_amqp_headers(Headers) ->
+    simplify_amqp_data({table, Headers}).
+
+simplify_amqp_data({Name, Key, Value}) ->
+    {Name, simplify_amqp_data({Key, Value})};
+simplify_amqp_data({Key, Value})
+  when Key == longstr; Key == long; Key == binary ->
+    Value;
+simplify_amqp_data({timestamp, Value}) ->
+    {{Y, Mo, D}, {H, M, S}} = calendar:gregorian_seconds_to_datetime(Value),
+    {1970 + Y, Mo, D + 1, H, M, S};
+simplify_amqp_data({array, Array}) ->
+    lists:map(fun simplify_amqp_data/1, Array);
+simplify_amqp_data({table, Table}) ->
+    maps:from_list(lists:map(fun simplify_amqp_data/1, Table)).
+
+amqp_headers_count_retries(undefined, _, _) ->
+    0;
+amqp_headers_count_retries(#{<<"x-death">> := Deaths}, Queue, Reason) ->
+    lists:foldl(fun (Death, PrevCount) ->
+                        case Death of
+                            #{<<"queue">> := Queue,
+                              <<"reason">> := Reason,
+                              <<"count">> := Count} -> Count;
+                            _ -> PrevCount
+                        end
+                end, 0, Deaths).

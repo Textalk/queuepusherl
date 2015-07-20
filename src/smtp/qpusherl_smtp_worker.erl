@@ -65,7 +65,7 @@ handle_info(retry, State = #state{owner = Owner}) ->
     case send_mail(State) of
         {done, State1} ->
             Owner ! {event_finished, self()},
-            lager:notice("Mail sent! (~p)", [self()]),
+            lager:info("Mail sent! (~p)", [self()]),
             {stop, normal, State1};
         {retry, State1} ->
             dispatch_retry(State1)
@@ -102,9 +102,8 @@ send_mail(State = #state{event = Event}) ->
                                                                            Smtp]),
     {A, B, C} = erlang:now(),
     N = (A + B + C) rem 3,
-    lager:info("Got random: ~p", [N]),
     case N of
-        0 -> exit({no_reason, "Just don't feel like it!"});
+        N when N =< 0 -> exit({no_reason, "Just don't feel like it!"});
         N -> timer:send_after(timer:seconds(3), timeout),
              receive timeout -> ok end,
              {done, State}
