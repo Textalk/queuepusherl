@@ -14,7 +14,6 @@
 
 -record(state, {
           owner           :: pid(),
-          tag             :: integer(),
           event           :: qpusherl_event:event(),
           retry_count = 0 :: non_neg_integer(),
           max_retries     :: non_neg_integer() | infinity,
@@ -28,21 +27,22 @@
 %start_link(Event) ->
 -spec start_link([term()]) -> {ok, pid()} | {error, term()}.
 start_link(Args) ->
-	gen_server:start_link(?MODULE, Args, []).
+    gen_server:start_link(?MODULE, Args, []).
 
 %% gen_server.
 
-init([Owner, Tag, Event]) ->
+init([Owner, Event]) ->
     lager:info("SMTP worker started! (~p)", [self()]),
     State = #state{
                owner = Owner,
-               tag = Tag,
                event = Event,
                max_retries = application:get_env(queuepusherl, smtp_retry_count, 10),
                initial_delay = application:get_env(queuepusherl, smtp_retry_initial_delay, 60000)
               },
-    self() ! retry,
-	{ok, State}.
+    %% Do not send retry, let the starting process do that so that it has time to monitor the
+    %% process first.
+    %self() ! retry,
+    {ok, State}.
 
 handle_call(_Request, _From, _State) ->
     error(badarg).
@@ -60,11 +60,11 @@ handle_cast(_Msg, _State) ->
     %BinName = atom_to_binary(Name, utf8),
     %<<"{ ", BinName/binary, ": ", BinMsg/binary, " }">>.
 
-handle_info(retry, State = #state{owner = Owner, tag = Tag}) ->
+handle_info(retry, State = #state{owner = Owner}) ->
     lager:info("Trying to send mail (~p)", [self()]),
     case send_mail(State) of
         {done, State1} ->
-            Owner ! {mail_sent, Tag},
+            Owner ! {event_finished, self()},
             lager:notice("Mail sent! (~p)", [self()]),
             {stop, normal, State1};
         {retry, State1} ->
@@ -72,11 +72,11 @@ handle_info(retry, State = #state{owner = Owner, tag = Tag}) ->
     end;
 handle_info(Info, State) ->
     lager:info("~p (~p) ignoring info ~p", [?MODULE, self(), Info]),
-	{noreply, State}.
+    {noreply, State}.
 
 terminate(_Reason, _State) ->
     lager:info("Terminating SMTP worker! (~p)", [self()]),
-	ok.
+    ok.
 
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.

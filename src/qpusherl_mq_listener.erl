@@ -16,11 +16,13 @@
 
 -define(RECONNECT_TIMEOUT, 10000).
 -define(SUBSCRIPTION_TIMEOUT, 10000).
+-define(REQUEUE_TIMEOUT, 10000).  % If a process fails, how long should it wait before trying again.
 
 -record(state, {
-          connection        :: {pid(), term()} | undefined,
-          channel           :: {pid(), term()} | undefined,
-          tags = sets:new() :: sets:set(integer())
+          connection              :: {pid(), term()} | undefined,
+          channel                 :: {pid(), term()} | undefined,
+          workers = #{}           :: map(),
+          oldworkers = sets:new() :: sets:set()
          }).
 
 %% API.
@@ -36,10 +38,16 @@ init([]) ->
     self() ! connect,
     {ok, #state{}}.
 
-terminate(Reason, #state{connection = {Connection, _}, channel = {Channel, _}}) ->
+terminate(Reason, #state{connection = {Connection, _}, channel = ChannelPair}) ->
     lager:warning("Message queue listener stopped: ~p~n", [Reason]),
-    catch amqp_channel:close(Channel),
+    case ChannelPair of
+        {Channel, _MRef} -> catch amqp_channel:close(Channel);
+        _ -> ok
+    end,
     catch amqp_connection:close(Connection),
+    ok;
+terminate(Reason, _State) ->
+    lager:warning("Message queue listener failed: ~p", [Reason]),
     ok.
 
 handle_call(_Request, _From, State) ->
@@ -49,23 +57,42 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 -spec create_worker(integer(), {atom(), term()}) -> {'ok', pid()}.
-create_worker(Tag, {smtp, Event}) ->
-    qpusherl_smtp_sup:create_child(self(), Tag, Event);
+create_worker(_Tag, {smtp, Event}) ->
+    qpusherl_smtp_sup:create_child(self(), Event);
 create_worker(_Tag, {http, _Event}) ->
-    %qpusherl_http_sup:create_child(self(), Tag, Event).
+    %qpusherl_http_sup:create_child(self(), Event).
     {ok, no_pid}.
 
-% @doc Handle incoming messages from system and RabbitMQ.
+% @doc Handle incoming messages from system, RabbitMQ and workers.
 handle_info({'DOWN', MRef, process, _Worker, Reason},
             #state{connection = {_, ConM}, channel = {_, ChanM}} = State) when
       MRef == ConM; MRef == ChanM ->
     lager:error("RabbitMQ connection or channel is down: ~p~n", [Reason]),
     {stop, rabbitmq_down, State#state{connection = undefined, channel = undefined}};
-handle_info({mail_sent, Tag}, State = #state{tags = Tags}) ->
-    send_ack(Tag, State),
-    lager:info("Mail event has been acked!"),
-    State1 = State#state{tags = sets:del_element(Tag, Tags)},
-    {noreply, State1};
+handle_info({'DOWN', _MRef, process, Worker, Reason},
+            #state{workers = Workers, oldworkers = OldWorkers} = State) ->
+    % TODO: Fix possible issue with worker going down signal is received before the mail_sent
+    % message is received.
+    case {maps:find(Worker, Workers), sets:is_element(Worker, OldWorkers)} of
+        {{ok, Tag}, _} ->
+            lager:warning("Got unexpected down signal from ~p/~p: ~p", [Tag, Worker, Reason]),
+            send_return(Tag, State),
+            {noreply, State};
+        {_, true} ->
+            lager:info("Confirmed worker terminated correctly: ~p", [Worker]),
+            {noreply, State#state{oldworkers = sets:del_element(Worker, OldWorkers)}};
+        {_, false} ->
+            lager:warning("Unknown process went down: ~p", [Worker]),
+            {noreply, State}
+    end;
+handle_info({event_finished, Worker}, State = #state{workers = Workers, oldworkers = OldWorkers}) ->
+    case maps:find(Worker, Workers) of
+        {ok, Tag} -> send_ack(Tag, State),
+                     lager:info("Event has been acked! (~p)", [Worker]),
+                     {noreply, State#state{workers = maps:remove(Worker, Workers),
+                                           oldworkers = sets:add_element(Worker, OldWorkers)}};
+        error -> {noreply, State}
+    end;
 handle_info(connect, #state{connection = undefined} = State) ->
     % Setup connection to RabbitMQ and connect.
     {ok, RabbitConfigs} = application:get_env(queuepusherl, rabbitmq_configs),
@@ -75,7 +102,7 @@ handle_info(connect, #state{connection = undefined} = State) ->
             ConM = monitor(process, Connection),
             {ok, Channel} = amqp_connection:open_channel(Connection),
             ChanM = monitor(process, Channel),
-            ok = setup_subscription(Channel),
+            ok = setup_subscriptions(Channel),
             lager:info("Established connection to RabbitMQ"),
             {noreply, State#state{connection = {Connection, ConM}, channel = {Channel, ChanM}}};
         {error, no_connection_to_mq} ->
@@ -83,13 +110,15 @@ handle_info(connect, #state{connection = undefined} = State) ->
             {noreply, State}
     end;
 handle_info({#'basic.deliver'{delivery_tag = Tag}, #amqp_msg{payload = Payload}},
-            #state{tags = Tags} = State) ->
-    lager:debug("Getting message: ~p~n", [non]),
-    % Handles incoming messages from RabbitMQ.
+            #state{workers = Workers} = State) ->
+    %% Handles incoming messages from RabbitMQ.
+    lager:info("Getting message: ~p~n", [Tag]),
     case qpusherl_event:parse(Payload) of
         {ok, Event} ->
-            {ok, _Pid} = create_worker(Tag, Event),
-            {noreply, State#state{tags = sets:add_element(Tag, Tags)}};
+            {ok, Pid} = create_worker(Tag, Event),
+            monitor(process, Pid),
+            Pid ! retry,
+            {noreply, State#state{workers = maps:put(Pid, Tag, Workers)}};
         {error, Reason, _} ->
             lager:error("Invalid qpusherl message:~n"
                         "Payload: ~p~n"
@@ -115,6 +144,15 @@ handle_info(Info, State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+send_return(Tag, #state{channel = {Channel, _}}) ->
+    lager:notice("Message ~p delayed for further retry.", [Tag]),
+    Reject = #'basic.reject'{delivery_tag = Tag, requeue = false},
+    amqp_channel:call(Channel, Reject).
+    %Publish = #'basic.publish'{routing_key = <<"queuepusherl">>,
+                               %exchange = <<"queuepusherl_dead_exchange">>},
+    %NewMsg = #amqp_msg{payload = <<"This is a test">>},
+    %amqp_channel:cast(Channel, Publish, NewMsg).
 
 send_ack(Tag, #state{channel = {Channel, _}}) ->
     Ack = #'basic.ack'{delivery_tag = Tag},
@@ -145,29 +183,75 @@ connect([]) ->
     lager:error("Failed to connect to any RabbitMQ brokers."),
     {error, no_connection_to_mq}.
 
-setup_subscription(ChannelPid) ->
-    %% Queue settings
-    {ok, Queue}    = application:get_env(queuepusherl, rabbitmq_queue),
-    {ok, Exchange} = application:get_env(queuepusherl, rabbitmq_exchange),
+-record(subscription_info, {
+          queue                        :: binary(),
+          queue_durable = false        :: boolean(),
+          exchange                     :: binary(),
+          exchange_durable = false     :: boolean(),
+          exchange_type = <<"direct">> :: binary(),
+          dlx                          :: binary(),
+          dlx_ttl                      :: non_neg_integer(),
+          routing_key                  :: binary(),
+          subscribe = false            :: boolean()
+         }).
 
-    %% We use the same name for the routing key as the queue name
-    RoutingKey = Queue,
+setup_subscriptions(Channel) ->
+    {ok, WorkQueue}     = application:get_env(queuepusherl, rabbitmq_queue), % <<"queuepusherl">>
+    {ok, WorkExchange}  = application:get_env(queuepusherl, rabbitmq_exchange), % <<"amq.direct">>
+    {ok, RetryQueue}    = {ok, <<"queuepusherl_retry">>},
+    {ok, RetryExchange} = {ok, <<"queuepusherl_dead_exchange">>},
 
-    %% Declare the queue
-    QueueDeclare = #'queue.declare'{queue = Queue, durable = true},
-    #'queue.declare_ok'{} = amqp_channel:call(ChannelPid, QueueDeclare),
+    ok = setup_subscription(Channel, #subscription_info{queue = WorkQueue,
+                                                        queue_durable = true,
+                                                        exchange = WorkExchange,
+                                                        exchange_durable = true,
+                                                        dlx = RetryExchange,
+                                                        routing_key = WorkQueue,
+                                                        subscribe = true}),
 
-    %% Bind the queue to the exchange
-    Binding = #'queue.bind'{queue = Queue, exchange = Exchange,
-                            routing_key = RoutingKey},
-    #'queue.bind_ok'{} = amqp_channel:call(ChannelPid, Binding),
+    ok = setup_subscription(Channel, #subscription_info{queue = RetryQueue,
+                                                        exchange = RetryExchange,
+                                                        dlx = WorkExchange,
+                                                        dlx_ttl = ?REQUEUE_TIMEOUT,
+                                                        routing_key = WorkQueue,
+                                                        subscribe = false}),
+    ok.
 
-    %% Setup the subscription
-    Subscription = #'basic.consume'{queue = Queue},
-    #'basic.consume_ok'{consumer_tag = Tag} =
-    amqp_channel:subscribe(ChannelPid, Subscription, self()),
-    receive
-        #'basic.consume_ok'{consumer_tag = Tag} -> ok
-    after
-        ?SUBSCRIPTION_TIMEOUT -> {error, timeout}
+
+setup_subscription(Channel, #subscription_info{queue = Queue,
+                                               queue_durable = DurableQ,
+                                               exchange = Exchange,
+                                               exchange_durable = DurableE,
+                                               exchange_type = ExchangeType,
+                                               dlx = Deadletter,
+                                               dlx_ttl = DeadletterTTL,
+                                               routing_key = RoutingKey,
+                                               subscribe = Subscribe
+                                              }) ->
+    ExchDecl = #'exchange.declare'{exchange = Exchange,
+                                   durable = DurableE,
+                                   type = ExchangeType},
+    #'exchange.declare_ok'{} = amqp_channel:call(Channel, ExchDecl),
+
+    Args = [{<<"x-dead-letter-exchange">>, longstr, Deadletter} || Deadletter /= undefined] ++
+    [{<<"x-message-ttl">>, signedint, DeadletterTTL} || DeadletterTTL /= undefined],
+
+    QueueDecl = #'queue.declare'{queue = Queue, durable = DurableQ, arguments = Args},
+    #'queue.declare_ok'{} = amqp_channel:call(Channel, QueueDecl),
+
+    BindDecl = #'queue.bind'{queue = Queue, exchange = Exchange, routing_key = RoutingKey},
+    #'queue.bind_ok'{} = amqp_channel:call(Channel, BindDecl),
+
+    if
+        Subscribe ->
+            Subscription = #'basic.consume'{queue = Queue},
+            #'basic.consume_ok'{consumer_tag = Tag} = amqp_channel:subscribe(Channel,
+                                                                             Subscription,
+                                                                             self()),
+            receive
+                #'basic.consume_ok'{consumer_tag = Tag} -> ok
+            after
+                ?SUBSCRIPTION_TIMEOUT -> {error, timeout}
+            end;
+        true -> ok
     end.
