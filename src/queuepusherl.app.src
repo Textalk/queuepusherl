@@ -23,15 +23,10 @@
 	{applications, [
 		kernel,
 		stdlib,
-		crypto,
 		lager,
-		asn1,
-		public_key,
 		ssl,
 		gen_smtp,
 		cowlib,
-		ranch,
-		gun,
 		jiffy,
 		amqp_client,
 		rabbit_common

@@ -1,5 +1,6 @@
 {
-    "title": "Push message",
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "title": "Queuepusherl push message",
     "type": "object",
     "definitions": {
         "extemail": {
@@ -65,9 +66,42 @@
         {
             "properties": {
                 "type": { "enum": [ "http" ] },
-                "properties": {
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "request": {
+                            "type": "object",
+                            "properties": {
+                                "method": { "type": "string" },
+                                "url": { "type": "string" },
+                                "query": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                },
+                                "data": {
+                                    "oneOf": [
+                                        {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        {
+                                            "type": "string"
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        "error": {
+                            "type": "object",
+                            "properties": {
+                            }
+                        }
+                    }
                 }
             }
         }
     ]
 }
+// vim: ft=json:tw=100

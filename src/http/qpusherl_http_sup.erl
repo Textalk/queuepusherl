@@ -3,18 +3,32 @@
 
 -export([start_link/0]).
 -export([init/1]).
--export([create_child/1]).
+-export([create_child/2]).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Procs = [],
-    {ok, {{one_for_one, 1, 5}, Procs}}.
+    lager:info("HTTP supervisor started!"),
+    Procs = [
+             {qpusherl_http_worker,
+              {qpusherl_http_worker, start_link, []},
+              temporary,             % restart policy
+              5000,                  % shutdown
+              worker,                % type
+              [qpusherl_http_worker] % modules
+             }
+            ],
+    {ok, {{simple_one_for_one, % strategy
+           1,                  % intensity
+           5                   % period
+          },
+          Procs
+         }
+    }.
 
 %% API functions, called outside of the process
 
-create_child(Event) ->
-    {ok, Pid} = supervisor:start_child(?MODULE, [Event]),
-    monitor(process, Pid),
-    {ok, Pid}.
+-spec create_child(pid(), qpusherl_http_event:http_event()) -> {'ok', pid()}.
+create_child(Owner, Event) ->
+    supervisor:start_child(?MODULE, [[Owner, Event]]).
