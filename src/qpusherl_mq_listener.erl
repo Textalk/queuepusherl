@@ -115,7 +115,7 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
                        payload = Payload}},
             State = #state{workers = Workers}) ->
     %% Handles incoming messages from RabbitMQ.
-    {ok, WorkQueue} = application:get_env(queuepusherl, rabbitmq_queue),
+    {ok, WorkQueue} = application:get_env(queuepusherl, rabbitmq_work_queue),
     Headers = simplify_amqp_headers(AmqpHeaders),
     Retries = amqp_headers_count_retries(Headers, WorkQueue, <<"rejected">>),
     lager:notice("Processing new message: ~p (retry: ~p)~n", [Tag, Retries]),
@@ -204,24 +204,28 @@ connect([]) ->
          }).
 
 setup_subscriptions(Channel) ->
-    {ok, WorkQueue}     = application:get_env(queuepusherl, rabbitmq_queue), % <<"queuepusherl">>
-    {ok, WorkExchange}  = application:get_env(queuepusherl, rabbitmq_exchange), % <<"amq.direct">>
-    {ok, RetryQueue}    = {ok, <<"queuepusherl_retry">>},
-    {ok, RetryExchange} = {ok, <<"queuepusherl_dead_exchange">>},
+    {ok, WorkQueue}     = application:get_env(queuepusherl, rabbitmq_work_queue), % <<"queuepusherl">>
+    {ok, WorkExchange}  = application:get_env(queuepusherl, rabbitmq_work_exchange), % <<"amq.direct">>
+    {ok, RetryQueue}    = application:get_env(queuepusherl, rabbitmq_retry_queue),
+    {ok, RetryExchange} = application:get_env(queuepusherl, rabbitmq_retry_exchange),
+    {ok, RoutingKey}    = application:get_env(queuepusherl, rabbitmq_routing_key),
+    lager:info("Setting up subscription:~n"
+               "Work queue: ~s @ ~s~n"
+               "Retry queue: ~s ~s", [WorkQueue, WorkExchange, RetryQueue, RetryExchange]),
 
     ok = setup_subscription(Channel, #subscription_info{queue = WorkQueue,
                                                         queue_durable = true,
                                                         exchange = WorkExchange,
                                                         exchange_durable = true,
                                                         dlx = RetryExchange,
-                                                        routing_key = WorkQueue,
+                                                        routing_key = RoutingKey,
                                                         subscribe = true}),
 
     ok = setup_subscription(Channel, #subscription_info{queue = RetryQueue,
                                                         exchange = RetryExchange,
                                                         dlx = WorkExchange,
                                                         dlx_ttl = ?REQUEUE_TIMEOUT,
-                                                        routing_key = WorkQueue,
+                                                        routing_key = RoutingKey,
                                                         subscribe = false}),
     ok.
 

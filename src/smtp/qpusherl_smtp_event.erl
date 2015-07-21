@@ -33,7 +33,7 @@
 -opaque smtp_event() :: #smtp_event{}.
 -export_type([smtp_event/0]).
 
--spec parse(map()) -> {ok, mail()} | {error, Reason :: binary()}.
+-spec parse(map()) -> {ok, smtp_event()} | {error, Reason :: binary()}.
 parse(#{<<"mail">> := MailInfo,
         <<"smtp">> := SmtpInfo,
         <<"error">> := MailErrorInfo}) ->

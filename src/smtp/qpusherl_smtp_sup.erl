@@ -11,13 +11,13 @@ start_link() ->
 init([]) ->
     lager:info("SMTP supervisor started!"),
     Procs = [
-             {qpusherl_smtp_worker, % id
+             {qpusherl_smtp_worker,  % id
               {qpusherl_smtp_worker, start_link, []}, % start
               %% Use 'temporary' instead of 'transient' since we need to be able to handle workers
               %% that die and take care of restarting it ourselves.
-              temporary, % restart
-              5000, % shutdown
-              worker, % type
+              temporary,             % restart policy
+              5000,                  % shutdown
+              worker,                % type
               [qpusherl_smtp_worker] % modules
              }
             ],

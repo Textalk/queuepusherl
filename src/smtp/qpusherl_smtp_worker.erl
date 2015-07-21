@@ -17,8 +17,7 @@
           event           :: qpusherl_event:event(),
           retry_count = 0 :: non_neg_integer(),
           max_retries     :: non_neg_integer() | infinity,
-          initial_delay   :: non_neg_integer(),
-          errors = []     :: [binary()]
+          initial_delay   :: non_neg_integer()
 }).
 
 %% API.
