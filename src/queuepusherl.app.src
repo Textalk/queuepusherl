@@ -15,7 +15,10 @@
 		   {rabbitmq_retry_exchange, <<"qpush.dlx">>},
 		   {rabbitmq_routing_key, <<"queuepusherl">>},
 		   {smtp_retry_count, 10},
-		   {smtp_retry_initial_delay, 2000},
+		   {smtp, [{event_retry_count, 10},
+				   {event_initial_delay, 2000}]},
+		   {http, [{event_retry_count, 10},
+				   {event_initial_delay, 2000}]},
 		   {error_smtp, []}
 		   ]},
 	{modules, []},

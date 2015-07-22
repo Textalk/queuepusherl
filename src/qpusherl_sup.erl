@@ -10,26 +10,19 @@ start_link() ->
 init([]) ->
     lager:info("Queuepusherl supervisor started!"),
     Procs = [
-             {qpusherl_mq_listener, % id 
+             {qpusherl_mq_listener,                   % id 
               {qpusherl_mq_listener, start_link, []}, % start 
-              permanent, % restart 
-              5000, % shutdown 
-              worker, % type 
-              [qpusherl_mq_listener] % modules 
+              permanent,                              % restart 
+              5000,                                   % shutdown 
+              worker,                                 % type 
+              [qpusherl_mq_listener]                  % modules 
              },
-             {qpusherl_smtp, % id 
-              {qpusherl_smtp_sup, start_link, []}, % start 
-              permanent, % restart 
-              5000, % shutdown 
-              supervisor, % type 
-              [qpusherl_smtp_sup] % modules 
-             %},
-             %{qpusherl_http_sup, % id 
-              %{queuepusher_http_sup, start_link, []}, % start 
-              %permanent, % restart 
-              %5000, % shutdown 
-              %supervisor, % type 
-              %[qpusherl_http_sup] % modules 
+             {qpusherl_event,
+              {qpusherl_worker_sup, start_link, []},
+              permanent,
+              5000,
+              supervisor,
+              [qpusherl_worker_sup]
              }
             ],
     {ok, {

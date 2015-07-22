@@ -1,15 +1,12 @@
 -module(qpusherl_http_event).
 
 -export([parse/1]).
--export([add_error/2]).
 
 -export([get_request/1]).
 
 -type http_req() :: map().
 
--record(http_event, {request :: http_req(),
-                     errors = [] :: [{atom(), binary()}]
-                    }).
+-record(http_event, {request :: http_req()}).
 -opaque http_event() :: #http_event{}.
 -export_type([http_event/0]).
 
@@ -22,20 +19,12 @@ parse(#{<<"request">> := Request}) ->
             {error, Reason}
     end.
 
--spec add_error(http_event(), {atom(), binary()}) -> http_event().
-add_error(Event = #http_event{errors = Errors}, {Tag, Msg}) ->
-    Event#http_event{errors = [{Tag, Msg}|Errors]}.
-
 -spec build_request(map()) -> {'ok', http_req()} | {'error', term()}.
 build_request(#{<<"method">> := InMethod,
                 <<"query">> := InQuery,
                 <<"data">> := InData,
                 <<"url">> := InURL}) ->
-    Method = case string:to_upper(unicode:characters_to_list(InMethod)) of
-                 "POST" -> post;
-                 "GET" -> get;
-                 "PUT" -> put
-             end,
+    Method = erlang:list_to_atom(string:to_upper(unicode:characters_to_list(InMethod))),
     URLparts = case http_uri:parse(unicode:characters_to_list(InURL), [{fragment, true}]) of
                    {ok, {Schema, UserInfo, Host, Port, Path, UrlQuery, UrlFragment}} ->
                        ExpectedPort = case Schema of
@@ -88,6 +77,7 @@ format_url({Schema, User, Host, Port, Path, QueryList, Fragment}) ->
                 [<<"?", Query/binary>> || Query /= <<>>] ++
                 [<<"#", Fragment/binary>> || Fragment /= <<>>]).
 
+-spec binary_join([binary()]) -> binary().
 binary_join([]) ->
     <<>>;
 binary_join([Part|Rest]) ->

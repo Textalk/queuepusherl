@@ -57,13 +57,6 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
--spec create_worker(integer(), {atom(), term()}) -> {'ok', pid()}.
-create_worker(_Tag, {smtp, Event}) ->
-    qpusherl_smtp_sup:create_child(self(), Event);
-create_worker(_Tag, {http, _Event}) ->
-    %qpusherl_http_sup:create_child(self(), Event).
-    {ok, no_pid}.
-
 % @doc Handle incoming messages from system, RabbitMQ and workers.
 handle_info({'DOWN', MRef, process, _Worker, Reason},
             #state{connection = {_, ConM}, channel = {_, ChanM}} = State) when
@@ -72,7 +65,7 @@ handle_info({'DOWN', MRef, process, _Worker, Reason},
     {stop, rabbitmq_down, State#state{connection = undefined, channel = undefined}};
 handle_info({'DOWN', _MRef, process, Worker, Reason},
             #state{workers = Workers, oldworkers = OldWorkers} = State) ->
-    % TODO: Fix possible issue with worker going down signal is received before the mail_sent
+    % TODO: Fix possible issue with worker going down signal is received before the event_finished
     % message is received.
     case {maps:find(Worker, Workers), sets:is_element(Worker, OldWorkers)} of
         {{ok, Tag}, _} ->
@@ -86,7 +79,7 @@ handle_info({'DOWN', _MRef, process, Worker, Reason},
             lager:warning("Unknown process went down: ~p", [Worker]),
             {noreply, State}
     end;
-handle_info({event_finished, Worker}, State = #state{workers = Workers, oldworkers = OldWorkers}) ->
+handle_info({worker_finished, Worker}, State = #state{workers = Workers, oldworkers = OldWorkers}) ->
     case maps:find(Worker, Workers) of
         {ok, Tag} -> send_ack(Tag, State),
                      lager:notice("Event has been acked! (~p :: ~p)", [Tag, Worker]),
@@ -121,17 +114,13 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
     lager:notice("Processing new message: ~p (retry: ~p)~n", [Tag, Retries]),
     case Retries =< ?MAX_REQUEUES andalso qpusherl_event:parse(Payload) of
         {ok, Event} ->
-            {ok, Worker} = create_worker(Tag, Event),
-            lager:notice("Started new worker! (~p :: ~p)", [Tag, Worker]),
-            monitor(process, Worker),
-            Worker ! retry,
+            {ok, Worker} = add_worker(Tag, Event),
             {noreply, State#state{workers = maps:put(Worker, Tag, Workers)}};
         {error, Reason, _} ->
             lager:error("Invalid qpusherl message:~n"
                         "Payload: ~p~n"
-                        "Reason: ~p~n"
-                        "Trace: ~p~n",
-                        [Payload, Reason, erlang:get_stacktrace()]),
+                        "Reason: ~p~n",
+                        [Payload, Reason]),
             send_ack(Tag, State),
             {noreply, State};
         false ->
@@ -156,6 +145,13 @@ handle_info(Info, State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+add_worker(Tag, Event) ->
+    {ok, Worker} = qpusherl_worker_sup:create_child(self(), Event),
+    lager:notice("Started new worker! (~p :: ~p)", [Tag, Worker]),
+    monitor(process, Worker),
+    Worker ! retry,
+    {ok, Worker}.
 
 send_return(Tag, #state{channel = {Channel, _}}) ->
     lager:notice("Message ~p delayed for further retry.", [Tag]),

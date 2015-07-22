@@ -1,4 +1,4 @@
--module(qpusherl_http_sup).
+-module(qpusherl_worker_sup).
 -behaviour(supervisor).
 
 -export([start_link/0]).
@@ -9,19 +9,19 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    lager:info("HTTP supervisor started!"),
+    lager:info("Event worker supervisor started!"),
     Procs = [
-             {qpusherl_http_worker,
-              {qpusherl_http_worker, start_link, []},
-              temporary,             % restart policy
-              5000,                  % shutdown
-              worker,                % type
-              [qpusherl_http_worker] % modules
+             {qpusherl_event_worker,
+              {qpusherl_event_worker, start_link, []},
+              temporary,
+              5000,
+              worker,
+              [qpusherl_event_worker]
              }
             ],
     {ok, {{simple_one_for_one, % strategy
-           1,                  % intensity
-           5                   % period
+           1,                  % restart intensity
+           5                   % restart period
           },
           Procs
          }
