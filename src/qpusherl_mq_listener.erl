@@ -67,9 +67,14 @@ handle_info({'DOWN', _MRef, process, Worker, Reason},
     % TODO: Fix possible issue with worker going down signal is received before the event_finished
     % message is received.
     case {maps:find(Worker, Workers), sets:is_element(Worker, OldWorkers)} of
-        {{ok, Tag}, _} ->
-            lager:warning("Got worker down signal from ~p/~p: ~p", [Worker, Tag, Reason]),
-            send_return(Tag, State),
+        {{ok, {Tag, AttemptsLeft, Payload}}, _} ->
+            case Reason of
+                normal -> lager:warning("Got worker failed signal from ~p/~p",
+                                        [Worker, Tag]);
+                _ -> lager:warning("Got worker crashed signal from ~p/~p: ~p",
+                                        [Worker, Tag, Reason])
+            end,
+            attempt_failed(Tag, AttemptsLeft, Payload, State),
             {noreply, State};
         {_, true} ->
             lager:info("Confirmed worker terminated correctly: ~p", [Worker]),
@@ -80,11 +85,13 @@ handle_info({'DOWN', _MRef, process, Worker, Reason},
     end;
 handle_info({worker_finished, Worker}, State = #state{workers = Workers, oldworkers = OldWorkers}) ->
     case maps:find(Worker, Workers) of
-        {ok, Tag} -> send_ack(Tag, State),
-                     lager:notice("Event has been acked! (~p :: ~p)", [Tag, Worker]),
-                     {noreply, State#state{workers = maps:remove(Worker, Workers),
-                                           oldworkers = sets:add_element(Worker, OldWorkers)}};
-        error -> {noreply, State}
+        {ok, {Tag, _AttemptsLeft, _Payload}} ->
+            send_ack(Tag, State),
+            lager:notice("Event has been acked! (~p :: ~p)", [Tag, Worker]),
+            {noreply, State#state{workers = maps:remove(Worker, Workers),
+                                  oldworkers = sets:add_element(Worker, OldWorkers)}};
+        error ->
+            {noreply, State}
     end;
 handle_info(connect, #state{connection = undefined} = State) ->
     % Setup connection to RabbitMQ and connect.
@@ -111,12 +118,13 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
     {ok, MaxRequeues} = application:get_env(queuepusherl, event_requeue_count),
     WorkQueue = proplists:get_value(queue, AppWork),
     Headers = simplify_amqp_headers(AmqpHeaders),
-    Retries = amqp_headers_count_retries(Headers, WorkQueue, <<"rejected">>),
-    case Retries =< MaxRequeues andalso qpusherl_event:parse(Payload) of
+    Requeues = amqp_headers_count_retries(Headers, WorkQueue, <<"rejected">>),
+    AttemptsLeft = MaxRequeues - Requeues,
+    case qpusherl_event:parse(Payload) of
         {ok, Event} ->
-            lager:notice("Processing new message: ~p (retry: ~p/~p)~n", [Tag, Retries, MaxRequeues]),
-            {ok, Worker} = add_worker(Tag, Event),
-            {noreply, State#state{workers = maps:put(Worker, Tag, Workers)}};
+            lager:notice("Processing new message: ~p (attempts left: ~p)~n", [Tag, AttemptsLeft]),
+            {ok, Worker} = add_worker(Tag, Event, AttemptsLeft),
+            {noreply, State#state{workers = maps:put(Worker, {Tag, AttemptsLeft, Payload}, Workers)}};
         {error, Reason, _} ->
             lager:error("Invalid qpusherl message:~n"
                         "Payload: ~p~n"
@@ -149,12 +157,21 @@ handle_info(Info, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-add_worker(Tag, Event) ->
+add_worker(Tag, Event, RetriesLeft) ->
     {ok, Worker} = qpusherl_worker_sup:create_child(self(), Event),
     lager:notice("Started new worker! (~p :: ~p)", [Tag, Worker]),
     monitor(process, Worker),
-    Worker ! retry,
+    Worker ! {execute, RetriesLeft},
     {ok, Worker}.
+
+attempt_failed(Tag, AttemptsLeft, Payload, State)
+  when AttemptsLeft =< 0 ->
+    lager:notice("Event failed, give up completely", []),
+    send_ack(Tag, State),
+    send_fail(Payload, State);
+attempt_failed(Tag, AttemptsLeft, _Payload, State) ->
+    lager:notice("Event failed, retry ~p times", [AttemptsLeft - 1]),
+    send_return(Tag, State).
 
 send_fail(Payload, #state{channel = {Channel, _}}) ->
     {ok, AppFail} = application:get_env(queuepusherl, rabbitmq_fail),
@@ -247,8 +264,7 @@ setup_subscriptions(Channel) ->
                                                         queue_durable = true,
                                                         exchange = FailExchange,
                                                         exchange_durable = true,
-                                                        routing_key = FailKey,
-                                                        subscribe = true}),
+                                                        routing_key = FailKey}),
 
     ok = setup_subscription(Channel, #subscription_info{queue = RetryQueue,
                                                         exchange = RetryExchange,

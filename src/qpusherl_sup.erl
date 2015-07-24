@@ -27,7 +27,7 @@ init([]) ->
             ],
     {ok, {
        {one_for_all, % strategy
-        10,          % intensity
+        5,           % intensity
         10           % period
        },
        Procs

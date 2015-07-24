@@ -24,12 +24,14 @@ build_request(EventData) ->
     Defaults = #{<<"method">> => <<"GET">>,
                 <<"extra-headers">> => #{},
                 <<"content-type">> => <<"text/plain">>,
+                <<"require-success">> => false,
                 <<"query">> => #{},
                 <<"data">> => #{},
                 <<"url">> => undefined},
     #{<<"method">> := InMethod,
       <<"extra-headers">> := InHeaders,
       <<"content-type">> := InContentType,
+      <<"require-success">> := RequireSuccess,
       <<"query">> := InQuery,
       <<"data">> := InData,
       <<"url">> := InURL} = maps:merge(Defaults, EventData),
@@ -70,6 +72,7 @@ build_request(EventData) ->
     {ok, #{method => Method,
            headers => Headers,
            content_type => ContentType,
+           require_success => RequireSuccess,
            url => format_url(URLparts),
            data => case Data of
                        #{} -> cow_qs:qs(maps:to_list(Data));

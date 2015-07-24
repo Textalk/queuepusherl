@@ -74,6 +74,7 @@
                             "properties": {
                                 "method": { "type": "string" },
                                 "url": { "type": "string" },
+                                "require-success": { "type": "boolean" },
                                 "extra-headers": {
                                     "type": "object",
                                     "patternProperties": {
@@ -98,7 +99,8 @@
                                         }
                                     ]
                                 }
-                            }
+                            },
+                            "required": [ "method", "url" ]
                         },
                         "error": {
                             "type": "object",
