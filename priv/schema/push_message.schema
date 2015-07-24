@@ -29,7 +29,7 @@
                                 "extra-headers": {
                                     "type": "object",
                                     "patternProperties": {
-                                        ".+": { "type": "string" }
+                                        "[^ \t]+": { "type": "string" }
                                     }
                                 },
                                 "body": { "type": "string" }
@@ -74,10 +74,17 @@
                             "properties": {
                                 "method": { "type": "string" },
                                 "url": { "type": "string" },
+                                "extra-headers": {
+                                    "type": "object",
+                                    "patternProperties": {
+                                        "[^ \t]+": { "type": "string" }
+                                    }
+                                },
                                 "query": {
                                     "type": "object",
                                     "additionalProperties": true
                                 },
+                                "content-type": { "type": "string" },
                                 "data": {
                                     "oneOf": [
                                         {

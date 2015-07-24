@@ -16,7 +16,6 @@
 
 -define(RECONNECT_TIMEOUT, 10000).
 -define(SUBSCRIPTION_TIMEOUT, 10000).
--define(REQUEUE_TIMEOUT, 10000).  % If a process fails, how long should it wait before trying again.
 -define(MAX_REQUEUES, 3).
 
 -record(state, {
@@ -69,7 +68,7 @@ handle_info({'DOWN', _MRef, process, Worker, Reason},
     % message is received.
     case {maps:find(Worker, Workers), sets:is_element(Worker, OldWorkers)} of
         {{ok, Tag}, _} ->
-            lager:warning("Got unexpected down signal from ~p/~p: ~p", [Tag, Worker, Reason]),
+            lager:warning("Got worker down signal from ~p/~p: ~p", [Worker, Tag, Reason]),
             send_return(Tag, State),
             {noreply, State};
         {_, true} ->
@@ -108,12 +107,14 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
                        payload = Payload}},
             State = #state{workers = Workers}) ->
     %% Handles incoming messages from RabbitMQ.
-    {ok, WorkQueue} = application:get_env(queuepusherl, rabbitmq_work_queue),
+    {ok, AppWork} = application:get_env(queuepusherl, rabbitmq_work),
+    {ok, MaxRequeues} = application:get_env(queuepusherl, event_requeue_count),
+    WorkQueue = proplists:get_value(queue, AppWork),
     Headers = simplify_amqp_headers(AmqpHeaders),
     Retries = amqp_headers_count_retries(Headers, WorkQueue, <<"rejected">>),
-    lager:notice("Processing new message: ~p (retry: ~p)~n", [Tag, Retries]),
-    case Retries =< ?MAX_REQUEUES andalso qpusherl_event:parse(Payload) of
+    case Retries =< MaxRequeues andalso qpusherl_event:parse(Payload) of
         {ok, Event} ->
+            lager:notice("Processing new message: ~p (retry: ~p/~p)~n", [Tag, Retries, MaxRequeues]),
             {ok, Worker} = add_worker(Tag, Event),
             {noreply, State#state{workers = maps:put(Worker, Tag, Workers)}};
         {error, Reason, _} ->
@@ -121,11 +122,13 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
                         "Payload: ~p~n"
                         "Reason: ~p~n",
                         [Payload, Reason]),
+            send_fail(Payload, State),
             send_ack(Tag, State),
             {noreply, State};
         false ->
-            lager:error("Could not execute event ~p, retried too many times: ~n~p~nPayload: ~s",
-                        [Tag, Headers, Payload]),
+            lager:error("Could not execute event, retried too many times: ~n~p~nPayload: ~s",
+                        [Headers, Payload]),
+            send_fail(Payload, State),
             send_ack(Tag, State),
             {noreply, State}
     end;
@@ -152,6 +155,15 @@ add_worker(Tag, Event) ->
     monitor(process, Worker),
     Worker ! retry,
     {ok, Worker}.
+
+send_fail(Payload, #state{channel = {Channel, _}}) ->
+    {ok, AppFail} = application:get_env(queuepusherl, rabbitmq_fail),
+    Exchange = proplists:get_value(exchange, AppFail),
+    RoutingKey = proplists:get_value(routing_key, AppFail),
+    Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
+    Props = #'P_basic'{delivery_mode = 2},
+    Msg = #amqp_msg{props = Props, payload = Payload},
+    amqp_channel:cast(Channel, Publish, Msg).
 
 send_return(Tag, #state{channel = {Channel, _}}) ->
     lager:notice("Message ~p delayed for further retry.", [Tag]),
@@ -200,14 +212,28 @@ connect([]) ->
          }).
 
 setup_subscriptions(Channel) ->
-    {ok, WorkQueue}     = application:get_env(queuepusherl, rabbitmq_work_queue), % <<"queuepusherl">>
-    {ok, WorkExchange}  = application:get_env(queuepusherl, rabbitmq_work_exchange), % <<"amq.direct">>
-    {ok, RetryQueue}    = application:get_env(queuepusherl, rabbitmq_retry_queue),
-    {ok, RetryExchange} = application:get_env(queuepusherl, rabbitmq_retry_exchange),
-    {ok, RoutingKey}    = application:get_env(queuepusherl, rabbitmq_routing_key),
+    {ok, AppWork}    = application:get_env(queuepusherl, rabbitmq_work), % <<"queuepusherl">>
+    {ok, AppFail}    = application:get_env(queuepusherl, rabbitmq_fail),
+    {ok, AppRetry}   = application:get_env(queuepusherl, rabbitmq_retry),
+    {ok, RoutingKey} = application:get_env(queuepusherl, rabbitmq_routing_key),
+
+    WorkQueue = proplists:get_value(queue, AppWork),
+    WorkExchange = proplists:get_value(exchange, AppWork),
+
+    FailQueue = proplists:get_value(queue, AppFail),
+    FailExchange = proplists:get_value(exchange, AppFail),
+    FailKey = proplists:get_value(routing_key, AppFail),
+
+    RetryQueue = proplists:get_value(queue, AppRetry),
+    RetryExchange = proplists:get_value(exchange, AppRetry),
+    RetryTimeout = proplists:get_value(timeout, AppRetry),
+
     lager:info("Setting up subscription:~n"
                "Work queue: ~s @ ~s~n"
-               "Retry queue: ~s ~s", [WorkQueue, WorkExchange, RetryQueue, RetryExchange]),
+               "Fail queue: ~s @ ~s~n"
+               "Retry queue: ~s @ ~s", [WorkQueue, WorkExchange,
+                                        FailQueue, FailExchange,
+                                        RetryQueue, RetryExchange]),
 
     ok = setup_subscription(Channel, #subscription_info{queue = WorkQueue,
                                                         queue_durable = true,
@@ -217,10 +243,17 @@ setup_subscriptions(Channel) ->
                                                         routing_key = RoutingKey,
                                                         subscribe = true}),
 
+    ok = setup_subscription(Channel, #subscription_info{queue = FailQueue,
+                                                        queue_durable = true,
+                                                        exchange = FailExchange,
+                                                        exchange_durable = true,
+                                                        routing_key = FailKey,
+                                                        subscribe = true}),
+
     ok = setup_subscription(Channel, #subscription_info{queue = RetryQueue,
                                                         exchange = RetryExchange,
                                                         dlx = WorkExchange,
-                                                        dlx_ttl = ?REQUEUE_TIMEOUT,
+                                                        dlx_ttl = RetryTimeout,
                                                         routing_key = RoutingKey,
                                                         subscribe = false}),
     ok.

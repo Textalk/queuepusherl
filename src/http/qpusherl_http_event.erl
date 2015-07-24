@@ -20,11 +20,20 @@ parse(#{<<"request">> := Request}) ->
     end.
 
 -spec build_request(map()) -> {'ok', http_req()} | {'error', term()}.
-build_request(#{<<"method">> := InMethod,
-                <<"query">> := InQuery,
-                <<"data">> := InData,
-                <<"url">> := InURL}) ->
-    Method = erlang:list_to_atom(string:to_upper(unicode:characters_to_list(InMethod))),
+build_request(EventData) ->
+    Defaults = #{<<"method">> => <<"GET">>,
+                <<"extra-headers">> => #{},
+                <<"content-type">> => <<"text/plain">>,
+                <<"query">> => #{},
+                <<"data">> => #{},
+                <<"url">> => undefined},
+    #{<<"method">> := InMethod,
+      <<"extra-headers">> := InHeaders,
+      <<"content-type">> := InContentType,
+      <<"query">> := InQuery,
+      <<"data">> := InData,
+      <<"url">> := InURL} = maps:merge(Defaults, EventData),
+    Method = erlang:list_to_atom(string:to_lower(unicode:characters_to_list(InMethod))),
     URLparts = case http_uri:parse(unicode:characters_to_list(InURL), [{fragment, true}]) of
                    {ok, {Schema, UserInfo, Host, Port, Path, UrlQuery, UrlFragment}} ->
                        ExpectedPort = case Schema of
@@ -56,7 +65,11 @@ build_request(#{<<"method">> := InMethod,
                _ when is_map(InData) -> cow_qs:qs(maps:to_list(InData));
                _ -> InData
            end,
+    Headers = InHeaders,
+    ContentType = InContentType,
     {ok, #{method => Method,
+           headers => Headers,
+           content_type => ContentType,
            url => format_url(URLparts),
            data => case Data of
                        #{} -> cow_qs:qs(maps:to_list(Data));

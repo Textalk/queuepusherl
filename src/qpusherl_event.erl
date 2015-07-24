@@ -3,6 +3,11 @@
 -export([parse/1]).
 -export([add_error/2]).
 
+-define(EVENT_TYPES, #{
+          <<"smtp">> => qpusherl_smtp_event,
+          <<"http">> => qpusherl_http_event
+         }).
+
 -type event_error() :: {atom(), binary()}.
 -type event() :: {Event :: term(), Errors :: [event_error()]}.
 
@@ -14,13 +19,9 @@ add_error({Event, Errors}, Error) ->
 parse(BinaryEvent) ->
     try
         EventMap = jiffy:decode(BinaryEvent, [return_maps]),
-        EventTypes = #{
-          <<"smtp">> => qpusherl_smtp_event,
-          <<"http">> => qpusherl_http_event
-         },
         EventType = maps:get(<<"type">>, EventMap),
         EventData = maps:get(<<"data">>, EventMap),
-        case maps:find(EventType, EventTypes) of
+        case maps:find(EventType, ?EVENT_TYPES) of
             {ok, Module} ->
                 AType = list_to_atom(unicode:characters_to_list(EventType)),
                 Errors = [],
@@ -28,7 +29,8 @@ parse(BinaryEvent) ->
                     {ok, Event} -> {ok, {AType, {Event, Errors}}};
                     {error, Reason0} -> {error, failed_parse, Reason0}
                 end;
-            _ ->
+            Other ->
+                lager:debug("No event type for ~s: ~p~nEvent: ~p", [EventType, Other, BinaryEvent]),
                 {error, no_parse_module, <<"Could not parse event type, ", EventType/binary>>}
         end
     catch
