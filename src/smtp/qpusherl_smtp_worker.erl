@@ -2,14 +2,14 @@
 %-behaviour(gen_server).
 
 -export([process_event/1]).
--export([fail_event/1]).
+-export([fail_event/2]).
 
-process_event({Event, _Errors}) ->
+process_event(Event) ->
     lager:notice("Process SMTP event!"),
     send_mail(Event),
     ok.
 
-fail_event({_Event, _Errors}) ->
+fail_event(_Event, _Errors) ->
     ok.
 
 send_mail(Event) ->

@@ -18,9 +18,10 @@
          }).
 
 -record(state, {
-          event  :: term(),
-          owner  :: pid(),
-          callback :: atom()
+          event          :: qpusherl_event:event(),
+          owner          :: pid(),
+          closed = false :: boolean(),
+          callback       :: atom()
 }).
 
 -type state() :: #state{}.
@@ -34,7 +35,7 @@ start_link(Args) ->
 %% gen_server.
 
 init([Owner, {Tag, Event}]) ->
-    lager:info("Event worker started! (~p)", [self()]),
+    lager:info("Event worker started! (~p/~p)", [Tag, self()]),
     Callback = case maps:find(Tag, ?EVENT_TYPES) of
                    {ok, Module} -> Module;
                    _ -> throw({invalid_event, <<"Unknown event type">>})
@@ -52,20 +53,23 @@ handle_call(_Request, _From, _State) ->
 handle_cast(_Msg, _State) ->
     error(badarg).
 
-handle_info({execute, N}, State)
-  when N =< 0 ->
-    fail_event(State),
-    {stop, normal, State};
-handle_info({execute, _}, State = #state{owner = Owner}) ->
-    lager:info("Trying to execute event (~p)", [self()]),
+handle_info(execute, State = #state{closed = false, owner = Owner}) ->
     case execute_event(State) of
         {done, State1} ->
             Owner ! {worker_finished, self()},
             lager:info("Event completed! (~p)", [self()]),
-            {stop, normal, State1};
-        {retry, State1} ->
-            {stop, normal, State1}
+            {noreply, State1#state{closed = true}};
+        {retry, Error, State1 = #state{}} ->
+            Owner ! {worker_finished, {self(), Error}},
+            {noreply, State1#state{closed = true}}
     end;
+handle_info({failed, Errors}, State) ->
+    fail_event(State, Errors);
+handle_info(stop, State = #state{closed = true}) ->
+    {stop, normal, State};
+handle_info({stop, Errors}, State) ->
+    fail_event(Errors, State),
+    {stop, normal, State};
 handle_info(Info, _State) ->
     error({badarg, Info}).
 
@@ -82,11 +86,10 @@ execute_event(#state{event = Event, callback = Callback} = State) ->
         ok ->
             {done, State};
         {error, Reason, Description} ->
-            Event1 = qpusherl_event:add_error(Event, {Reason, Description}),
-            lager:warning("Request failed, scheduling retry: ~p", [Reason]),
-            {retry, State#state{event = Event1}}
+            lager:warning("Request failed (~p): ~p", [self(), Reason]),
+            {retry, {Reason, Description}, State}
     end.
 
--spec fail_event(state()) -> ok.
-fail_event(#state{event = Event, callback = Callback}) ->
-    Callback:fail_event(Event).
+-spec fail_event(state(), [tuple()]) -> ok.
+fail_event(Errors, #state{event = Event, callback = Callback}) ->
+    Callback:fail_event(Event, Errors).

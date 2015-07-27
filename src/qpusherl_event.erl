@@ -1,19 +1,14 @@
 -module(qpusherl_event).
 
 -export([parse/1]).
--export([add_error/2]).
 
 -define(EVENT_TYPES, #{
           <<"smtp">> => qpusherl_smtp_event,
           <<"http">> => qpusherl_http_event
          }).
 
--type event_error() :: {atom(), binary()}.
--type event() :: {Event :: term(), Errors :: [event_error()]}.
-
--spec add_error(event(), event_error()) -> event().
-add_error({Event, Errors}, Error) ->
-    {Event, [Error|Errors]}.
+-opaque event() :: qpusherl_smtp_event:smtp_event() | qpusherl_http_event:http_event().
+-export_type([event/0]).
 
 -spec parse(binary()) -> {ok, {atom(), event()}} | {error, term()}.
 parse(BinaryEvent) ->
@@ -24,9 +19,8 @@ parse(BinaryEvent) ->
         case maps:find(EventType, ?EVENT_TYPES) of
             {ok, Module} ->
                 AType = list_to_atom(unicode:characters_to_list(EventType)),
-                Errors = [],
                 case Module:parse(EventData) of
-                    {ok, Event} -> {ok, {AType, {Event, Errors}}};
+                    {ok, Event} -> {ok, {AType, Event}};
                     {error, Reason0} -> {error, failed_parse, Reason0}
                 end;
             Other ->
