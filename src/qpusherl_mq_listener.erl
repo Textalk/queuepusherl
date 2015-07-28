@@ -211,22 +211,20 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
             {ok, Worker} = create_worker(Tag, Event),
             State1 = add_event(MsgState, State),
             {noreply, store_worker(Worker, Tag, State1)};
-        {error, Reason, _} ->
+        {error, Reason, Message} ->
             lager:error("Invalid qpusherl message:~n"
                         "Payload: ~p~n"
                         "Reason: ~p~n",
                         [Payload, Reason]),
-            MsgState1 = add_error(MsgState, {Reason, <<"Invalid qpusherl message">>}),
-            send_fail(MsgState1, State),
-            ack_event(MsgState1, State),
-            {noreply, State};
+            MsgState1 = add_error(MsgState, {Reason, Message}),
+            State1 = reject_event(MsgState1, State),
+            {noreply, State1};
         false ->
             lager:error("Could not execute event, retried too many times: ~n~p~nPayload: ~s",
                         [Headers, Payload]),
             MsgState1 = add_error(MsgState, {execution_failed, <<"Could not execute event">>}),
-            send_fail(MsgState1, State),
-            ack_event(MsgState1, State),
-            {noreply, State}
+            State1 = reject_event(MsgState1, State),
+            {noreply, State1}
     end;
 handle_info(#'basic.cancel'{}, State) ->
     % Handles RabbitMQ going down. Nothing to worry about, just crash and restart.

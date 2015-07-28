@@ -43,7 +43,7 @@ send_error_mail(Event) ->
         Receipt when is_binary(Receipt) ->
             ok;
         {error, Type, Message} ->
-            error_logger:error_msg("Failed to send error mail: ~p ~p", [Type, Message]);
+            lager:error("Failed to send error mail: ~p ~p", [Type, Message]);
         {error, Reason} ->
-            error_logger:error_msg("Failed to send error mail: ~p", [Reason])
+            lager:error("Failed to send error mail: ~p", [Reason])
     end.
