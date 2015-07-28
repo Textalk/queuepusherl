@@ -20,13 +20,22 @@
 
 -type rabbitmq_tag() :: integer().
 
+-record(msgstate, {
+          tag         :: rabbitmq_tag(),
+          retries = 0 :: non_neg_integer(),
+          payload     :: binary(),
+          errors = [] :: [{atom(), binary()}]
+         }).
+-type msgstate() :: #msgstate{}.
+
 -record(state, {
           connection              :: {pid(), term()} | undefined,
           channel                 :: {pid(), term()} | undefined,
-          events = #{}            :: #{rabbitmq_tag() => {integer(), binary()}},
+          events = #{}            :: #{rabbitmq_tag() => msgstate()},
           workers = #{}           :: #{pid() => rabbitmq_tag()},
           oldworkers = sets:new() :: sets:set(pid())
          }).
+
 
 %% API.
 
@@ -94,45 +103,65 @@ clear_old_worker(Worker, State = #state{oldworkers = OldWorkers}) ->
 get_event(Tag, #state{events = Events}) ->
     maps:find(Tag, Events).
 
-add_event(Tag, Attempts, Payload, State = #state{events = Events}) ->
-    State#state{events = maps:put(Tag, {Attempts, Payload}, Events)}.
+add_event(MsgState = #msgstate{tag = Tag}, State = #state{events = Events}) ->
+    State#state{events = maps:put(Tag, MsgState, Events)}.
 
+remove_event(#msgstate{tag = Tag}, State) ->
+    remove_event(Tag, State);
 remove_event(Tag, State = #state{events = Events}) ->
     State#state{events = maps:remove(Tag, Events)}.
 
+add_error(MsgState = #msgstate{errors = Errors}, Error) ->
+    MsgState#msgstate{errors = [Error|Errors]}.
+
 %% @doc Acknowledge completion event to rabbitmq
-ack_event(Tag, State = #state{channel = {Channel, _}}) ->
+ack_event(#msgstate{tag = Tag}, State = #state{channel = {Channel, _}}) ->
     Ack = #'basic.ack'{delivery_tag = Tag},
     amqp_channel:call(Channel, Ack),
     State.
 
 %% @doc Move the event to the retry queue
-queue_retry_event(Tag, _Payload, Errors, State = #state{channel = {Channel, _}}) ->
-    lager:notice("Message ~p delayed for further retry: ~p", [Tag, Errors]),
+queue_retry_event(MsgState = #msgstate{tag = Tag, errors = Errors},
+                  State = #state{channel = {Channel, _}}) ->
+    lager:info("Message ~p delayed for further retry: ~p", [Tag, Errors]),
     Reject = #'basic.reject'{delivery_tag = Tag, requeue = false},
     amqp_channel:cast(Channel, Reject),
-    remove_event(Tag, State).
+    remove_event(MsgState, State).
 
 %% @doc Reject event without further attempts to retry.
-reject_event(Tag, Errors, State) ->
-    lager:info("Stop retrying event (~p): ~p", [Tag, Errors]),
-    ack_event(Tag, State),
-    case get_event(Tag, State) of
-        {ok, {_AttemptsLeft, Payload}} ->
-            send_fail(Payload, State);
-        error ->
-            ok
-    end,
-    remove_event(Tag, State).
+reject_event(MsgState = #msgstate{tag = Tag}, State) ->
+    lager:info("Stop retrying event (~p)", [Tag]),
+    State1 = ack_event(MsgState, State),
+    State2 = send_fail(MsgState, State1),
+    remove_event(MsgState, State2).
 
-send_fail(Payload, #state{channel = {Channel, _}}) ->
+send_fail(#msgstate{payload = Payload, errors = Errors},
+          State = #state{channel = {Channel, _}}) ->
+    lager:info("Sending fail-event to message queue", []),
     {ok, AppFail} = application:get_env(queuepusherl, rabbitmq_fail),
     Exchange = proplists:get_value(exchange, AppFail),
     RoutingKey = proplists:get_value(routing_key, AppFail),
     Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
-    Props = #'P_basic'{delivery_mode = 2},
+    AmqpErrors = [{<<"qpush-error">>, array,
+                   lists:map(fun (E) ->
+                                     {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
+                             end,
+                             [Errors])}],
+    Props = #'P_basic'{
+               delivery_mode = 2,
+               headers = AmqpErrors
+              },
     Msg = #amqp_msg{props = Props, payload = Payload},
-    amqp_channel:cast(Channel, Publish, Msg).
+    amqp_channel:cast(Channel, Publish, Msg),
+    State.
+
+get_worker_event(Worker, State = #state{workers = Workers}) ->
+    case maps:find(Worker, Workers) of
+        {ok, Tag} ->
+            get_event(Tag, State);
+        error ->
+            error
+    end.
 
 % @doc Handle incoming messages from system, RabbitMQ and workers.
 handle_info({'DOWN', MRef, process, _Worker, Reason},
@@ -140,63 +169,66 @@ handle_info({'DOWN', MRef, process, _Worker, Reason},
       MRef == ConM; MRef == ChanM ->
     lager:error("RabbitMQ connection or channel is down: ~p~n", [Reason]),
     {stop, rabbitmq_down, State#state{connection = undefined, channel = undefined}};
-handle_info({'DOWN', _MRef, process, Worker, Reason}, #state{workers = Workers} = State) ->
+handle_info({'DOWN', _MRef, process, Worker, Reason}, State = #state{}) ->
+    lager:info("Events: ~p~nWorkers: ~p",
+               [maps:size(State#state.events), maps:size(State#state.workers)]),
     case is_old_worker(Worker, State) of
         true ->
             lager:info("Got expected DOWN signal from worker (~p)", [Worker]),
             {noreply, clear_old_worker(Worker, State)};
         false ->
-            case Reason of
-                normal ->
-                    lager:warning("Got worker failed signal from ~p", [Worker]);
-                _ ->
-                    lager:warning("Got worker crashed signal from ~p: ~p", [Worker, Reason])
-            end,
-            State1 = case maps:find(Worker, Workers) of
-                         {ok, Tag} ->
-                             reject_event(Tag, [{worker_failed, <<>>}], remove_worker(Worker, State));
-                         _ ->
+            Message = case Reason of
+                          normal ->
+                              lager:warning("Got worker failed signal from ~p",
+                                            [Worker]),
+                              <<"Worker stopped">>;
+                          _ ->
+                              lager:warning("Got worker crashed signal from ~p: ~p",
+                                            [Worker, Reason]),
+                              <<"Worker crashed">>
+                      end,
+            State2 = case get_worker_event(Worker, State) of
+                         {ok, MsgState} ->
+                             MsgState1 = add_error(MsgState, {worker_failed, Message}),
+                             reject_event(MsgState1, State);
+                         error ->
                              State
                      end,
-            {noreply, State1}
+            State3 = remove_worker(Worker, State2), % Remove worker without retireing
+            {noreply, State3}
     end;
-handle_info({worker_finished, {Worker, Errors}}, State = #state{workers = Workers}) ->
-    case maps:find(Worker, Workers) of
-        {ok, Tag} ->
-            %% Event failed!
-            State1 = retire_worker(Worker, State),
-            State2 = case get_event(Tag, State) of
-                         {ok, {0, _Payload}} ->
-                             Worker ! {stop, Errors},
-                             lager:info("Worker failed with no more retries (~p)", [Worker]),
-                             reject_event(Tag, Errors, State1);
-                         {ok, {AttemptsLeft, Payload}} ->
-                             Worker ! stop,
-                             lager:info("Worker failed with ~p more retries (~p)",
-                                        [AttemptsLeft, Worker]),
-                             queue_retry_event(Tag, Payload, Errors, State1);
-                         error ->
-                             lager:info("Events: ~p~n~p", [Tag, State1#state.events]),
-                             State1
-                     end,
-            {noreply, State2};
-        error ->
-            lager:error("Uknown worker finished! (~p)", [Worker]),
-            {noreply, State}
-    end;
-handle_info({worker_finished, Worker}, State = #state{workers = Workers}) ->
-    case maps:find(Worker, Workers) of
-        {ok, Tag} ->
-            %% Event finished!
-            State1 = retire_worker(Worker, State),
-            lager:info("Worker finished (~p)", [Worker]),
-            State2 = ack_event(Tag, State1),
-            Worker ! stop,
-            {noreply, State2};
-        error ->
-            lager:error("Unknown worker finished! (~p)", [Worker]),
-            {noreply, State}
-    end;
+handle_info({worker_finished, {Worker, Error}}, State = #state{}) ->
+    %% Event failed!
+    State1 = case get_worker_event(Worker, State) of
+                 {ok, MsgState = #msgstate{retries = 0}} ->
+                     Worker ! {stop, Error},
+                     lager:error("Worker failed with no more retries (~p)", [Worker]),
+                     MsgState1 = add_error(MsgState, Error),
+                     reject_event(MsgState1, State);
+                 {ok, MsgState = #msgstate{retries = AttemptsLeft}} ->
+                     Worker ! stop,
+                     lager:info("Worker failed with ~p more retries (~p)",
+                                [AttemptsLeft, Worker]),
+                     MsgState1 = add_error(MsgState, Error),
+                     queue_retry_event(MsgState1, State);
+                 error ->
+                     lager:error("Could not match an event to the worker (~p)", [Worker]),
+                     State
+             end,
+    {noreply, retire_worker(Worker, State1)};
+handle_info({worker_finished, Worker}, State = #state{}) ->
+    State1 = case get_worker_event(Worker, State) of
+                 {ok, MsgState} ->
+                     %% Event finished!
+                     lager:info("Worker finished (~p)", [Worker]),
+                     State2 = ack_event(MsgState, State),
+                     Worker ! stop,
+                     retire_worker(Worker, State2);
+                 error ->
+                     lager:error("Unknown worker finished! (~p)", [Worker]),
+                     State
+             end,
+    {noreply, State1};
 handle_info(connect, #state{connection = undefined} = State) ->
     % Setup connection to RabbitMQ and connect.
     {ok, RabbitConfigs} = application:get_env(queuepusherl, rabbitmq_configs),
@@ -214,8 +246,7 @@ handle_info(connect, #state{connection = undefined} = State) ->
             {noreply, State}
     end;
 handle_info({#'basic.deliver'{delivery_tag = Tag},
-             #amqp_msg{props = #'P_basic'{headers = AmqpHeaders},
-                       payload = Payload}},
+             #amqp_msg{props = #'P_basic'{headers = AmqpHeaders}, payload = Payload}},
             State = #state{}) ->
     %% Handles incoming messages from RabbitMQ.
     {ok, AppWork} = application:get_env(queuepusherl, rabbitmq_work),
@@ -224,25 +255,30 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
     Headers = simplify_amqp_headers(AmqpHeaders),
     Requeues = amqp_headers_count_retries(Headers, WorkQueue, <<"rejected">>),
     AttemptsLeft = MaxRequeues - Requeues,
+    MsgState = #msgstate{tag = Tag,
+                         retries = AttemptsLeft,
+                         payload = Payload},
     case qpusherl_event:parse(Payload) of
         {ok, Event} ->
-            lager:notice("Processing new message: ~p (attempts left: ~p)~n", [Tag, AttemptsLeft]),
+            lager:notice("Processing new message: ~p (attempts left: ~p)", [Tag, AttemptsLeft]),
             {ok, Worker} = create_worker(Tag, Event),
-            State1 = add_event(Tag, AttemptsLeft, Payload, State),
+            State1 = add_event(MsgState, State),
             {noreply, store_worker(Worker, Tag, State1)};
         {error, Reason, _} ->
             lager:error("Invalid qpusherl message:~n"
                         "Payload: ~p~n"
                         "Reason: ~p~n",
                         [Payload, Reason]),
-            send_fail(Payload, State),
-            ack_event(Tag, State),
+            MsgState1 = add_error(MsgState, {Reason, <<"Invalid qpusherl message">>}),
+            send_fail(MsgState1, State),
+            ack_event(MsgState1, State),
             {noreply, State};
         false ->
             lager:error("Could not execute event, retried too many times: ~n~p~nPayload: ~s",
                         [Headers, Payload]),
-            send_fail(Payload, State),
-            ack_event(Tag, State),
+            MsgState1 = add_error(MsgState, {execution_failed, <<"Could not execute event">>}),
+            send_fail(MsgState1, State),
+            ack_event(MsgState1, State),
             {noreply, State}
     end;
 handle_info(#'basic.cancel'{}, State) ->

@@ -39,7 +39,7 @@ process_event(Event) ->
                     end
             end;
         {error, Reason} ->
-            lager:error("Could not perform request (~p): ~p", [self(), Reason]),
+            lager:info("Could not perform request (~p): ~p", [self(), Reason]),
             {error, connection_failed, Reason}
     end.
 
