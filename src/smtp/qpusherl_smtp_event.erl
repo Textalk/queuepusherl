@@ -96,7 +96,7 @@ build_error(ErrorInfo) ->
     #mailerror{to = To, subject = Subject, body = Body}.
 
 -spec get_error_mail(smtp_event()) -> extern_mail().
-get_error_mail(#smtp_event{mail = {_, _, OrigMail},
+get_error_mail(#smtp_event{mail = #mail{body = OrigMail},
                            error = #mailerror{to = To,
                                               subject = Subject,
                                               body = Body,
@@ -172,6 +172,7 @@ to_header_case(Binary) ->
 -spec join([binary()]) -> binary().
 join(Xs) -> join(Xs, <<>>).
 
+join([], _) -> <<>>;
 join([X], Acc) -> <<Acc/binary, X/binary>>;
 join([X|Xs], Acc) -> join(Xs, <<Acc/binary, X/binary, ", ">>).
 

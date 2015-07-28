@@ -25,7 +25,8 @@
 							{timeout, 10000}
 						   ]},
 		   {event_requeue_count, 3},
-		   {error_smtp, []}
+		   {error_smtp, []},
+		   {error_from, <<"admin@localhost.localdomain">>}
 		   ]},
 	{modules, []},
 	{registered, []},
