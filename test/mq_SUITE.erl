@@ -1,7 +1,6 @@
 -module(mq_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
--include("qpusherl_events.hrl").
 -include("../deps/amqp_client/include/amqp_client.hrl").
 
 -export([all/0]).
@@ -22,7 +21,7 @@ init_per_testcase(_TestCase, Config) ->
                      port = 5672
                      },
     try
-        Exchange = <<"amq.direct">>,
+        Exchange = <<"qpush.exchange">>,
         {ok, Connection} = amqp_connection:start(ClientConfig),
         {ok, Channel} = amqp_connection:open_channel(Connection),
         #'exchange.declare_ok'{} = amqp_channel:call(Channel,
@@ -32,7 +31,7 @@ init_per_testcase(_TestCase, Config) ->
                                                        }),
         #'queue.declare_ok'{queue = Queue} = amqp_channel:call(Channel,
                                                                #'queue.declare'{
-                                                                  queue = <<"queuepusherl">>,
+                                                                  queue = <<"qpush.work">>,
                                                                   durable = true
                                                                  }),
         Binding = #'queue.bind'{queue = Queue,

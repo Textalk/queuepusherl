@@ -1,4 +1,4 @@
--module(qpusherl_ct_hook).
+-module(queuepusherl_ct_hook).
 
 -export([id/1]).
 -export([init/2]).

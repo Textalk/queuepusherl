@@ -1,5 +1,6 @@
 {
-    "title": "Push message",
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "title": "Queuepusherl push message",
     "type": "object",
     "definitions": {
         "extemail": {
@@ -28,7 +29,7 @@
                                 "extra-headers": {
                                     "type": "object",
                                     "patternProperties": {
-                                        ".+": { "type": "string" }
+                                        "[^ \t]+": { "type": "string" }
                                     }
                                 },
                                 "body": { "type": "string" }
@@ -65,9 +66,51 @@
         {
             "properties": {
                 "type": { "enum": [ "http" ] },
-                "properties": {
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "request": {
+                            "type": "object",
+                            "properties": {
+                                "method": { "type": "string" },
+                                "url": { "type": "string" },
+                                "require-success": { "type": "boolean" },
+                                "extra-headers": {
+                                    "type": "object",
+                                    "patternProperties": {
+                                        "[^ \t]+": { "type": "string" }
+                                    }
+                                },
+                                "query": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                },
+                                "content-type": { "type": "string" },
+                                "data": {
+                                    "oneOf": [
+                                        {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        {
+                                            "type": "string"
+                                        }
+                                    ]
+                                }
+                            },
+                            "required": [ "method", "url" ]
+                        },
+                        "error": {
+                            "type": "object",
+                            "properties": {
+                            }
+                        }
+                    }
                 }
             }
         }
     ]
 }
+// vim: ft=json:tw=100

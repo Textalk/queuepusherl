@@ -9,26 +9,36 @@
 								{host, "localhost"},
 								{port, 5672}
 							   ]]},
-		   {rabbitmq_queue, <<"queuepusherl">>},
-		   {rabbitmq_exchange, <<"amq.direct">>},
-		   {smtp_retry_count, 10},
-		   {smtp_retry_initial_delay, 2000},
-		   {error_smtp, []}
+		   {rabbitmq_reconnect_timeout, 5000},
+		   {rabbitmq_routing_key, <<"queuepusherl">>},
+		   {rabbitmq_work, [
+							{queue, <<"qpush.work.queue">>},
+							{exchange, <<"qpush.exchange">>}
+						   ]},
+		   {rabbitmq_fail, [
+							{queue, <<"qpush.fail.queue">>},
+							{exchange, <<"qpush.exchange">>},
+							{routing_key, <<"queuepusherl_fail">>}
+						   ]},
+		   {rabbitmq_retry, [
+							{queue, <<"qpush.retry.queue">>},
+							{exchange, <<"qpush.dlx">>},
+							{timeout, 10000}
+						   ]},
+		   {event_attempt_count, 3},
+		   {error_smtp, []},
+		   {error_from, <<"admin@localhost.localdomain">>}
 		   ]},
 	{modules, []},
 	{registered, []},
 	{applications, [
 		kernel,
 		stdlib,
-		crypto,
+		inets,
 		lager,
-		asn1,
-		public_key,
 		ssl,
 		gen_smtp,
 		cowlib,
-		ranch,
-		gun,
 		jiffy,
 		amqp_client,
 		rabbit_common

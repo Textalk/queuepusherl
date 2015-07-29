@@ -1,6 +1,7 @@
 PROJECT = queuepusherl
 RABBITMQ_CLIENT_PATCH = 1
-DEPS = lager gun jiffy gen_smtp amqp_client
+DEPS = lager cowlib jiffy gen_smtp amqp_client
+#DEPS = lager gun jiffy gen_smtp amqp_client
 TEST_DEPS = meck
 
 CT_OPTS = -ct_hooks queuepusherl_ct_hook []

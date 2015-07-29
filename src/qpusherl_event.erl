@@ -2,27 +2,38 @@
 
 -export([parse/1]).
 
--type event() :: term().
+-define(EVENT_TYPES, #{
+          <<"smtp">> => qpusherl_smtp_event,
+          <<"http">> => qpusherl_http_event
+         }).
 
--spec parse(binary()) -> {ok, event()} | {error, term()}.
+-opaque event() :: qpusherl_smtp_event:smtp_event() | qpusherl_http_event:http_event().
+-export_type([event/0]).
+
+-spec parse(binary()) -> {ok, {atom(), event()}} | {error, term()}.
 parse(BinaryEvent) ->
     try
         EventMap = jiffy:decode(BinaryEvent, [return_maps]),
-        case {maps:get(<<"type">>, EventMap),
-              maps:get(<<"data">>, EventMap)} of
-            {<<"smtp">>, Data} ->
-                {ok, SmtpEvent} = qpusherl_smtp_event:parse(Data),
-                {smtp, SmtpEvent}
+        EventType = maps:get(<<"type">>, EventMap),
+        EventData = maps:get(<<"data">>, EventMap),
+        case maps:find(EventType, ?EVENT_TYPES) of
+            {ok, Module} ->
+                AType = list_to_atom(unicode:characters_to_list(EventType)),
+                case Module:parse(EventData) of
+                    {ok, Event} -> {ok, {AType, Event}};
+                    {error, Reason0} -> {error, failed_parse, Reason0}
+                end;
+            Other ->
+                lager:debug("No event type for ~s: ~p~nEvent: ~p", [EventType, Other, BinaryEvent]),
+                {error, no_parse_module, <<"Could not parse event type, ", EventType/binary>>}
         end
-    of
-        Event -> {ok, Event}
     catch
-        error:Reason ->
-            {Explaination, _Trace} = extend_error(Reason, erlang:get_stacktrace()),
-            {error, Reason, Explaination};
-        throw:Reason ->
-            {Explaination, _Trace} = extend_error(Reason, erlang:get_stacktrace()),
-            {error, Reason, Explaination}
+        error:Reason1 ->
+            {Explaination, _Trace} = extend_error(Reason1, erlang:get_stacktrace()),
+            {error, Reason1, Explaination};
+        throw:Reason1 ->
+            {Explaination, _Trace} = extend_error(Reason1, erlang:get_stacktrace()),
+            {error, Reason1, Explaination}
     end.
 
 extend_error(function_clause = Reason, [{Mod, Fun, Args, [{file, File}, {line, Line}]}|Tail]) ->
