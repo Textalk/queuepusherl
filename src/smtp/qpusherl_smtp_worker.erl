@@ -34,8 +34,8 @@ send_mail(Event) ->
     end.
 
 send_error_mail(Event, Errors) ->
-    {ok, ErrorSmtp} = application:get_env(queuepusherl, error_smtp),
     ErrorMail = qpusherl_smtp_event:get_error_mail(Event, Errors),
+    ErrorSmtp = qpusherl_smtp_event:get_error_smtp(Event),
     lager:debug("send_error_mail(#state{event = ~p})~nErrorMail: ~p~nErrorSmtp: ~p~n", [Event,
                                                                                         ErrorMail,
                                                                                         ErrorSmtp]),

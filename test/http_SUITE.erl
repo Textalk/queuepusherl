@@ -8,11 +8,15 @@
 
 -export([parse_test_1/1]).
 -export([parse_test_2/1]).
+-export([process_request_success/1]).
+-export([process_request_fail/1]).
 
 all() ->
     [
      parse_test_1,
-     parse_test_2
+     parse_test_2,
+     process_request_success,
+     process_request_fail
     ].
 
 init_per_testcase(_TestCase, Config) ->
@@ -26,14 +30,15 @@ parse_test_1(_Config) ->
                     #{<<"request">> =>
                       #{<<"method">> => <<"GET">>,
                         <<"query">> => #{<<"kepa">> => <<"cepa">>, <<"gripa">> => true},
-                        <<"data">> => #{},
-                        <<"url">> => <<"http://localhost:8080/foo?foo=bar&apa=bepa">>}}),
+                        <<"data">> => #{<<"foo">> => <<"bar">>},
+                        <<"url">> => <<"http://localhost:8080/foo?foo=bar&apa=bepa">>}}, []),
     Req = qpusherl_http_event:get_request(Event),
-    ?assertMatch(#{data := <<>>,
-                   method := 'GET',
+    ?assertMatch(#{data := <<"foo=bar">>,
+                   headers := #{},
+                   method := get,
+                   require_success := false,
                    url := <<"http://localhost:8080/foo?foo=bar&apa=bepa&gripa&kepa=cepa">>},
                  Req),
-    ?debugVal(Req),
     ok.
 
 parse_test_2(_Config) ->
@@ -42,11 +47,47 @@ parse_test_2(_Config) ->
                       #{<<"method">> => <<"POST">>,
                         <<"query">> => #{},
                         <<"data">> => <<"this is some data">>,
-                        <<"url">> => <<"https://localhost#foobar">>}}),
+                        <<"url">> => <<"https://localhost#foobar">>}}, []),
     Req = qpusherl_http_event:get_request(Event),
     ?assertMatch(#{data := <<"this is some data">>,
-                   method := 'POST',
+                   headers := #{},
+                   method := post,
+                   require_success := false,
                    url := <<"https://localhost/#foobar">>},
                  Req),
-    ?debugVal(Req),
+    ok.
+
+process_request_success(_Config) ->
+    meck:new(httpc, []),
+    meck:expect(httpc, request, fun(get, {"http://localhost/?foo=bar", []},
+                                    _HttpOptions, _Options) ->
+                                        {ok, {{<<"HTTP1.1">>, 200, <<"Ok">>}, [], <<"Response">>}}
+                                end),
+    Event = {http_event, #{method => get,
+                           headers => #{},
+                           content_type => <<>>,
+                           data => <<>>,
+                           require_success => false,
+                           url => <<"http://localhost/?foo=bar">>}},
+    ?assertEqual(ok, qpusherl_http_worker:process_event(Event)),
+    %meck:validate(httpc),
+    meck:unload(httpc),
+    ok.
+
+process_request_fail(_Config) ->
+    meck:new(httpc, []),
+    meck:expect(httpc, request, fun(get, {"http://localhost/?foo=bar", []},
+                                    _HttpOptions, _Options) ->
+                                        {error, {could_not_connect, <<>>}}
+                                end),
+    Event = {http_event, #{method => get,
+                           headers => #{},
+                           content_type => <<>>,
+                           data => <<>>,
+                           require_success => false,
+                           url => <<"http://localhost/?foo=bar">>}},
+    ?assertEqual({error, connection_failed, {could_not_connect, <<>>}},
+                 qpusherl_http_worker:process_event(Event)),
+    %meck:validate(httpc),
+    meck:unload(httpc),
     ok.

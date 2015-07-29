@@ -1,6 +1,7 @@
 -module(qpusherl_event).
 
--export([parse/1]).
+-export([parse/2]).
+-export([get_config/2]).
 
 -define(EVENT_TYPES, #{
           <<"smtp">> => qpusherl_smtp_event,
@@ -10,8 +11,11 @@
 -opaque event() :: qpusherl_smtp_event:smtp_event() | qpusherl_http_event:http_event().
 -export_type([event/0]).
 
--spec parse(binary()) -> {ok, {atom(), event()}} | {error, term()}.
-parse(BinaryEvent) ->
+get_config(Key, Config) ->
+    proplists:get_value(Key, Config, undefined).
+
+-spec parse(binary(), [{atom(), term()}]) -> {ok, {atom(), event()}} | {error, term()}.
+parse(BinaryEvent, Config) ->
     try
         EventMap = jiffy:decode(BinaryEvent, [return_maps]),
         EventType = maps:get(<<"type">>, EventMap),
@@ -19,7 +23,7 @@ parse(BinaryEvent) ->
         case maps:find(EventType, ?EVENT_TYPES) of
             {ok, Module} ->
                 AType = list_to_atom(unicode:characters_to_list(EventType)),
-                case Module:parse(EventData) of
+                case Module:parse(EventData, Config) of
                     {ok, Event} -> {ok, {AType, Event}};
                     {error, Reason0} -> {error, failed_parse, Reason0}
                 end;

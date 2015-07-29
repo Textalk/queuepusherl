@@ -31,7 +31,8 @@
           channel                 :: {pid(), term()} | undefined,
           events = #{}            :: #{rabbitmq_tag() => msgstate()},
           workers = #{}           :: #{pid() => rabbitmq_tag()},
-          oldworkers = sets:new() :: sets:set(pid())
+          oldworkers = sets:new() :: sets:set(pid()),
+          config = []             :: [{atom(), term()}]
          }).
 
 
@@ -45,8 +46,27 @@ start_link() ->
 
 init([]) ->
     lager:info("Message queue listener started!"),
+    Get = fun (Key, Default) ->
+                  case application:get_env(queuepusherl, Key) of
+                      {ok, Value} -> {Key, Value};
+                      error -> {Key, Default}
+                  end
+          end,
+    Config = [Get(rabbitmq_fail, undefined),
+              Get(rabbitmq_work, undefined),
+              Get(rabbitmq_retry, undefined),
+              Get(rabbitmq_routing_key, undefined),
+              Get(rabbitmq_configs, undefined),
+              Get(rabbitmq_reconnect_timeout, undefined),
+              Get(event_attempt_count, undefined),
+              Get(error_from, undefined),
+              Get(error_smtp, undefined)
+             ],
     self() ! connect,
-    {ok, #state{}}.
+    {ok, #state{config = Config}}.
+
+get_config(Key, #state{config = Config}) ->
+    proplists:get_value(Key, Config, undefined).
 
 terminate(Reason, #state{connection = {Connection, _}, channel = ChannelPair}) ->
     lager:warning("Message queue listener stopped: ~p~n", [Reason]),
@@ -94,7 +114,7 @@ reject_event(#msgstate{tag = Tag} = MsgState, State) ->
 send_fail(#msgstate{payload = Payload, errors = Errors},
           #state{channel = {Channel, _}} = State) ->
     lager:info("Sending fail-event to message queue", []),
-    {ok, AppFail} = application:get_env(queuepusherl, rabbitmq_fail),
+    AppFail = get_config(rabbitmq_fail, State),
     Exchange = proplists:get_value(exchange, AppFail),
     RoutingKey = proplists:get_value(routing_key, AppFail),
     Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
@@ -177,8 +197,8 @@ handle_info({worker_finished, Worker}, #state{} = State) ->
     {noreply, State1};
 handle_info(connect, #state{connection = undefined} = State) ->
     % Setup connection to RabbitMQ and connect.
-    {ok, RabbitConfigs} = application:get_env(queuepusherl, rabbitmq_configs),
-    {ok, ReconnectDelay} = application:get_env(queuepusherl, rabbitmq_reconnect_timeout),
+    RabbitConfigs = get_config(rabbitmq_configs, State),
+    ReconnectDelay = get_config(rabbitmq_reconnect_timeout, State),
     lager:info("Connecting to RabbitMQ"),
     case connect(RabbitConfigs) of
         {ok, Connection} ->
@@ -194,10 +214,10 @@ handle_info(connect, #state{connection = undefined} = State) ->
     end;
 handle_info({#'basic.deliver'{delivery_tag = Tag},
              #amqp_msg{props = #'P_basic'{headers = AmqpHeaders}, payload = Payload}},
-            #state{} = State) ->
+            #state{config = Config} = State) ->
     %% Handles incoming messages from RabbitMQ.
-    {ok, AppWork} = application:get_env(queuepusherl, rabbitmq_work),
-    {ok, MaxAttempts} = application:get_env(queuepusherl, event_attempt_count),
+    AppWork = get_config(rabbitmq_work, State),
+    MaxAttempts = get_config(event_attempt_count, State),
     WorkQueue = proplists:get_value(queue, AppWork),
     Headers = simplify_amqp_headers(AmqpHeaders),
     Requeues = amqp_headers_count_retries(Headers, WorkQueue, <<"rejected">>),
@@ -214,10 +234,10 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
             State1 = queue_retry_event(MsgState, State),
             {noreply, State1};
         false ->
-            case qpusherl_event:parse(Payload) of
+            case qpusherl_event:parse(Payload, Config) of
                 {ok, Event} ->
                     lager:notice("Processing new message: ~p (attempts left: ~p)", [Tag, AttemptsLeft]),
-                    {ok, Worker} = create_worker(Tag, Event),
+                    {ok, Worker} = create_worker(Tag, Event, State),
                     State1 = add_event(MsgState, State),
                     {noreply, store_worker(Worker, Tag, State1)};
                 {error, Reason, Message} ->
@@ -253,7 +273,7 @@ handle_info(Info, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-create_worker(Tag, Event) ->
+create_worker(Tag, Event, #state{config = _Config}) ->
     {ok, Worker} = qpusherl_worker_sup:create_child(self(), Event),
     lager:debug("Started new worker! (~p :: ~p)", [Tag, Worker]),
     monitor(process, Worker),
@@ -298,10 +318,10 @@ connect([]) ->
          }).
 
 setup_subscriptions(Channel) ->
-    {ok, AppWork}    = application:get_env(queuepusherl, rabbitmq_work), % <<"queuepusherl">>
-    {ok, AppFail}    = application:get_env(queuepusherl, rabbitmq_fail),
-    {ok, AppRetry}   = application:get_env(queuepusherl, rabbitmq_retry),
-    {ok, RoutingKey} = application:get_env(queuepusherl, rabbitmq_routing_key),
+    AppWork = get_config(queuepusherl, rabbitmq_work), % <<"queuepusherl">>
+    AppFail = get_config(queuepusherl, rabbitmq_fail),
+    AppRetry = get_config(queuepusherl, rabbitmq_retry),
+    RoutingKey = get_config(queuepusherl, rabbitmq_routing_key),
 
     WorkQueue = proplists:get_value(queue, AppWork),
     WorkExchange = proplists:get_value(exchange, AppWork),

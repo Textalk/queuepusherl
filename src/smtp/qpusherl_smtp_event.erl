@@ -1,43 +1,49 @@
 -module(qpusherl_smtp_event).
 
--export([parse/1]).
+-export([parse/2]).
 -export([get_mail/1]).
 -export([get_error_mail/2]).
+-export([get_error_smtp/1]).
 -export([get_smtp_options/1]).
 
 -record(mail, {from :: binary(),
-               to :: [binary()],
+               to   :: [binary()],
                body :: binary()}).
 -type mail() :: #mail{}.
 
--record(smtp, {relay :: binary(),
-               port :: integer(),
+-record(smtp, {relay    :: binary(),
+               port     :: integer(),
                username :: binary(),
                password :: binary()}).
 -type smtp() :: #smtp{}.
 
--record(mailerror, {to :: binary(),
+-record(mailerror, {to      :: binary(),
+                    from    :: binary(),
                     subject :: binary(),
-                    body :: binary()}).
+                    body    :: binary(),
+                    smtp    :: term()}).
 -type mailerror() :: #mailerror{}.
 
 -type extern_mail() :: {From :: binary(),
-                        To :: [binary()],
+                        To   :: [binary()],
                         Body :: binary()}.
 
--record(smtp_event, {mail :: mail(),
-                     smtp :: smtp(),
+-record(smtp_event, {mail  :: mail(),
+                     smtp  :: smtp(),
                      error :: mailerror()}).
 -opaque smtp_event() :: #smtp_event{}.
 -export_type([smtp_event/0]).
 
--spec parse(map()) -> {ok, smtp_event()} | {error, Reason :: binary()}.
+-spec parse(map(), [{atom(), term()}]) -> {ok, smtp_event()} | {error, Reason :: binary()}.
 parse(#{<<"mail">> := MailInfo,
         <<"smtp">> := SmtpInfo,
-        <<"error">> := MailErrorInfo}) ->
+        <<"error">> := MailErrorInfo},
+     State) ->
+    ErrorFrom = qpusherl_event:get_config(error_from, State),
+    ErrorSmtp = qpusherl_event:get_config(error_smtp, State),
     Mail = build_mail(MailInfo),
     Smtp = build_smtp(SmtpInfo),
-    Error = build_error(MailErrorInfo),
+    Error = build_error(MailErrorInfo#{<<"from">> => ErrorFrom, <<"smtp">> => ErrorSmtp}),
     {ok, #smtp_event{mail = Mail, smtp = Smtp, error = Error}}.
 
 -spec build_mail(map()) -> mail().
@@ -86,20 +92,26 @@ build_smtp(SmtpInfo) ->
 -spec build_error(map()) -> mailerror().
 build_error(ErrorInfo) ->
     To = maps:get(<<"to">>, ErrorInfo),
+    From = maps:get(<<"from">>, ErrorInfo),
     Subject = maps:get(<<"subject">>, ErrorInfo),
     Body = maps:get(<<"body">>, ErrorInfo),
+    Smtp = maps:get(<<"smtp">>, ErrorInfo),
     true = is_binary(To),
+    true = is_binary(From),
     true = is_binary(Subject),
     true = is_binary(Body),
-    #mailerror{to = To, subject = Subject, body = Body}.
+    #mailerror{to = To, from = From, subject = Subject, body = Body, smtp = Smtp}.
+
+get_error_smtp(#smtp_event{error = #mailerror{smtp = Smtp}}) ->
+    Smtp.
 
 -spec get_error_mail(smtp_event(), term()) -> extern_mail().
 get_error_mail(#smtp_event{mail = #mail{body = OrigMail},
                            error = #mailerror{to = To,
+                                              from = ErrorFrom,
                                               subject = Subject,
                                               body = Body}},
               Errors) ->
-    {ok, ErrorFrom} = application:get_env(queuepusherl, error_from),
     MessagePart = {<<"text">>, <<"plain">>, [], [], Body},
     %ErrorsPart = {<<"text">>, <<"plain">>, [], [], join(Errors)},
     ErrorsPart = {<<"text">>, <<"plain">>, [], [],

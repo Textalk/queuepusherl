@@ -1,6 +1,6 @@
 -module(qpusherl_http_event).
 
--export([parse/1]).
+-export([parse/2]).
 
 -export([get_request/1]).
 
@@ -10,8 +10,8 @@
 -opaque http_event() :: #http_event{}.
 -export_type([http_event/0]).
 
--spec parse(map()) -> {'ok', http_event()} | {'error', Reason :: binary()}.
-parse(#{<<"request">> := Request}) ->
+-spec parse(map(), [{atom(), term()}]) -> {'ok', http_event()} | {'error', Reason :: binary()}.
+parse(#{<<"request">> := Request}, _Config) ->
     case build_request(Request) of
         {ok, HttpReq} ->
             {ok, #http_event{request = HttpReq}};

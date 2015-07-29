@@ -3,6 +3,7 @@
 -export([process_event/1]).
 -export([fail_event/2]).
 
+-spec process_event(qpusherl_http_event:http_event()) -> 'ok' | {'error', atom(), binary()}.
 process_event(Event) ->
     #{method := Method,
       headers := Headers,

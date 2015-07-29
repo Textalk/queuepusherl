@@ -5,6 +5,8 @@ DEPS = lager cowlib jiffy gen_smtp amqp_client
 TEST_DEPS = meck
 
 CT_OPTS = -ct_hooks queuepusherl_ct_hook []
-ERLC_OPTS += +'{parse_transform, lager_transform}'
+EXTRA_ERLC_OPTS = +'{parse_transform, lager_transform}'
+ERLC_OPTS += ${EXTRA_ERLC_OPTS}
+TEST_ERLC_OPTS += ${EXTRA_ERLC_OPTS}
 
 include erlang.mk
