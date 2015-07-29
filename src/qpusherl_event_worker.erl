@@ -35,7 +35,7 @@ start_link(Args) ->
 %% gen_server.
 
 init([Owner, {EventType, Event}]) ->
-    lager:info("~p event worker started! (~p)", [EventType, self()]),
+    lager:debug("~p event worker started! (~p)", [EventType, self()]),
     Callback = case maps:find(EventType, ?EVENT_TYPES) of
                    {ok, Module} -> Module;
                    _ -> throw({invalid_event, <<"Unknown event type">>})
@@ -57,7 +57,7 @@ handle_info(execute, State = #state{closed = false, owner = Owner}) ->
     case execute_event(State) of
         {done, State1} ->
             Owner ! {worker_finished, self()},
-            lager:info("Event completed! (~p)", [self()]),
+            lager:debug("Event completed! (~p)", [self()]),
             {noreply, State1#state{closed = true}};
         {retry, Error, State1 = #state{}} ->
             Owner ! {worker_finished, {self(), Error}},
@@ -74,7 +74,7 @@ handle_info(Info, _State) ->
     error({badarg, Info}).
 
 terminate(_Reason, _State) ->
-    lager:info("Event worker terminated! (~p)", [self()]),
+    lager:debug("Event worker terminated! (~p)", [self()]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->

@@ -14,7 +14,7 @@ process_event(Event) ->
     SUrl = unicode:characters_to_list(Url),
     LHeaders = maps:to_list(Headers),
     SContentType = unicode:characters_to_list(ContentType),
-    ReqData = case Method of 
+    ReqData = case Method of
                   _ when Method == get; Method == delete; Method == head ;
                          Method == options ; Method == trace ->
                       {SUrl, LHeaders};
@@ -25,10 +25,12 @@ process_event(Event) ->
         {ok, saved_to_file} ->
             ok;
         {ok, Result} ->
-            case Result of 
-                {{_HTTP, StatusCode, _StatusText}, _Headers, _Body}
+            case Result of
+                {{_HTTP, StatusCode, StatusText}, _Headers, Body}
                     when StatusCode >= 200, StatusCode < 300 ->
-                    lager:notice("Got success response (~p): ~p", [self(), Result]),
+                    CapBody = ellipsis_string(unicode:characters_to_binary(Body), 28),
+                    lager:notice("Got success response (~p): ~s -> ~s", [self(), StatusText, CapBody]),
+                    lager:debug("Whole response: ~p", [Result]),
                     ok;
                 {{_HTTP, StatusCode, StatusText}, _Headers, _Body} ->
                     lager:warning("Got failed response ~p (~p) (~p)",
@@ -46,3 +48,13 @@ process_event(Event) ->
 fail_event(_Event, _Errors) ->
     lager:notice("HTTP event failed (~p)", [self()]),
     ok.
+
+ellipsis_string(String, Length) ->
+    case (size(String) + 3) > Length of
+        true ->
+            ShortBody = string:substr(unicode:characters_to_list(String), 1, Length),
+            <<(unicode:characters_to_binary(ShortBody))/binary, "...">>;
+        false ->
+            String
+    end.
+

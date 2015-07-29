@@ -120,7 +120,7 @@ handle_info({'DOWN', MRef, process, _Worker, Reason},
 handle_info({'DOWN', _MRef, process, Worker, Reason}, State = #state{}) ->
     case is_old_worker(Worker, State) of
         true ->
-            lager:info("Got expected DOWN signal from worker (~p)", [Worker]),
+            lager:debug("Got expected DOWN signal from worker (~p)", [Worker]),
             {noreply, clear_old_worker(Worker, State)};
         false ->
             Message = case Reason of
@@ -255,7 +255,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 create_worker(Tag, Event) ->
     {ok, Worker} = qpusherl_worker_sup:create_child(self(), Event),
-    lager:info("Started new worker! (~p :: ~p)", [Tag, Worker]),
+    lager:debug("Started new worker! (~p :: ~p)", [Tag, Worker]),
     monitor(process, Worker),
     Worker ! execute,
     {ok, Worker}.
