@@ -34,9 +34,9 @@ start_link(Args) ->
 
 %% gen_server.
 
-init([Owner, {Tag, Event}]) ->
-    lager:info("Event worker started! (~p/~p)", [Tag, self()]),
-    Callback = case maps:find(Tag, ?EVENT_TYPES) of
+init([Owner, {EventType, Event}]) ->
+    lager:info("~p event worker started! (~p)", [EventType, self()]),
+    Callback = case maps:find(EventType, ?EVENT_TYPES) of
                    {ok, Module} -> Module;
                    _ -> throw({invalid_event, <<"Unknown event type">>})
                end,
@@ -86,7 +86,7 @@ execute_event(#state{event = Event, callback = Callback} = State) ->
         ok ->
             {done, State};
         {error, Reason, Description} ->
-            lager:warning("Request failed (~p): ~p", [self(), Reason]),
+            lager:warning("Event failed (~p): ~p", [self(), Reason]),
             {retry, {Reason, Description}, State}
     end.
 

@@ -1,9 +1,8 @@
 -module(qpusherl_smtp_event).
 
 -export([parse/1]).
--export([add_error/2]).
 -export([get_mail/1]).
--export([get_error_mail/1]).
+-export([get_error_mail/2]).
 -export([get_smtp_options/1]).
 
 -record(mail, {from :: binary(),
@@ -19,8 +18,7 @@
 
 -record(mailerror, {to :: binary(),
                     subject :: binary(),
-                    body :: binary(),
-                    errors = [] :: [{atom(), binary()}]}).
+                    body :: binary()}).
 -type mailerror() :: #mailerror{}.
 
 -type extern_mail() :: {From :: binary(),
@@ -95,15 +93,17 @@ build_error(ErrorInfo) ->
     true = is_binary(Body),
     #mailerror{to = To, subject = Subject, body = Body}.
 
--spec get_error_mail(smtp_event()) -> extern_mail().
+-spec get_error_mail(smtp_event(), term()) -> extern_mail().
 get_error_mail(#smtp_event{mail = #mail{body = OrigMail},
                            error = #mailerror{to = To,
                                               subject = Subject,
-                                              body = Body,
-                                              errors = Errors}}) ->
+                                              body = Body}},
+              Errors) ->
     {ok, ErrorFrom} = application:get_env(queuepusherl, error_from),
     MessagePart = {<<"text">>, <<"plain">>, [], [], Body},
-    ErrorsPart = {<<"text">>, <<"plain">>, [], [], join(Errors)},
+    %ErrorsPart = {<<"text">>, <<"plain">>, [], [], join(Errors)},
+    ErrorsPart = {<<"text">>, <<"plain">>, [], [],
+                  unicode:characters_to_binary(io_lib:format("~p", [Errors]))},
 
     Attachement = {<<"message">>, <<"rfc822">>, [],
                    [{<<"content-type-params">>, [{<<"name">>, <<"Mail">>}]},
@@ -136,10 +136,6 @@ get_smtp_options(#smtp_event{smtp = #smtp{relay = Relay,
     [{port, Port}  || Port /= undefined] ++
     [{username, User} || User /= undefined] ++
     [{password, Password} || Password /= undefined].
-
--spec add_error(smtp_event(), {atom(), binary()}) -> smtp_event().
-add_error(#smtp_event{error = #mailerror{errors = Errors} = MailError} = Event, {Tag, Msg}) ->
-    Event#smtp_event{error = MailError#mailerror{errors = [{Tag, Msg}|Errors]}}.
 
 %% ------------------------------------------------------------------------------------------------
 %% Helper functions

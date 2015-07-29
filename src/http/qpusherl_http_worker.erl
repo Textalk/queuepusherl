@@ -39,10 +39,10 @@ process_event(Event) ->
                     end
             end;
         {error, Reason} ->
-            lager:info("Could not perform request (~p): ~p", [self(), Reason]),
+            lager:info("Could not perform HTTP request (~p): ~p", [self(), Reason]),
             {error, connection_failed, Reason}
     end.
 
 fail_event(_Event, _Errors) ->
-    lager:notice("HTTP request failed (~p)", [self()]),
+    lager:notice("HTTP event failed (~p)", [self()]),
     ok.

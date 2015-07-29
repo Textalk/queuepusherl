@@ -8,8 +8,8 @@ process_event(Event) ->
     lager:notice("Process SMTP event!"),
     send_mail(Event).
 
-fail_event(Event, _Errors) ->
-    send_error_mail(Event).
+fail_event(Event, Errors) ->
+    send_error_mail(Event, Errors).
 
 send_mail(Event) ->
     Mail = qpusherl_smtp_event:get_mail(Event),
@@ -33,9 +33,9 @@ send_mail(Event) ->
             {error, unknown_error, Reason}
     end.
 
-send_error_mail(Event) ->
+send_error_mail(Event, Errors) ->
     {ok, ErrorSmtp} = application:get_env(queuepusherl, error_smtp),
-    ErrorMail = qpusherl_smtp_event:get_error_mail(Event),
+    ErrorMail = qpusherl_smtp_event:get_error_mail(Event, Errors),
     lager:debug("send_error_mail(#state{event = ~p})~nErrorMail: ~p~nErrorSmtp: ~p~n", [Event,
                                                                                         ErrorMail,
                                                                                         ErrorSmtp]),

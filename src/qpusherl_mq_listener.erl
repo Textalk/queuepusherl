@@ -14,9 +14,7 @@
 
 -include_lib("amqp_client/include/amqp_client.hrl").
 
--define(RECONNECT_TIMEOUT, 10000).
 -define(SUBSCRIPTION_TIMEOUT, 10000).
--define(MAX_REQUEUES, 3).
 
 -type rabbitmq_tag() :: integer().
 
@@ -77,7 +75,10 @@ ack_event(#msgstate{tag = Tag}, #state{channel = {Channel, _}} = State) ->
 %% @doc Move the event to the retry queue
 queue_retry_event(#msgstate{tag = Tag, errors = Errors} = MsgState,
                   #state{channel = {Channel, _}} = State) ->
-    lager:info("Message ~p delayed for further retry: ~p", [Tag, Errors]),
+    case Errors of
+        [] -> ok;
+        _ -> lager:info("Message ~p delayed for further retry: ~p", [Tag, Errors])
+    end,
     Reject = #'basic.reject'{delivery_tag = Tag, requeue = false},
     amqp_channel:cast(Channel, Reject),
     remove_event(MsgState, State).
@@ -117,8 +118,6 @@ handle_info({'DOWN', MRef, process, _Worker, Reason},
     lager:error("RabbitMQ connection or channel is down: ~p~n", [Reason]),
     {stop, rabbitmq_down, State#state{connection = undefined, channel = undefined}};
 handle_info({'DOWN', _MRef, process, Worker, Reason}, State = #state{}) ->
-    lager:debug("Events: ~p~nWorkers: ~p",
-                [maps:size(State#state.events), maps:size(State#state.workers)]),
     case is_old_worker(Worker, State) of
         true ->
             lager:info("Got expected DOWN signal from worker (~p)", [Worker]),
@@ -179,6 +178,7 @@ handle_info({worker_finished, Worker}, #state{} = State) ->
 handle_info(connect, #state{connection = undefined} = State) ->
     % Setup connection to RabbitMQ and connect.
     {ok, RabbitConfigs} = application:get_env(queuepusherl, rabbitmq_configs),
+    {ok, ReconnectDelay} = application:get_env(queuepusherl, rabbitmq_reconnect_timeout),
     lager:info("Connecting to RabbitMQ"),
     case connect(RabbitConfigs) of
         {ok, Connection} ->
@@ -189,7 +189,7 @@ handle_info(connect, #state{connection = undefined} = State) ->
             lager:info("Established connection to RabbitMQ"),
             {noreply, State#state{connection = {Connection, ConM}, channel = {Channel, ChanM}}};
         {error, no_connection_to_mq} ->
-            erlang:send_after(?RECONNECT_TIMEOUT, self(), connect),
+            erlang:send_after(ReconnectDelay, self(), connect),
             {noreply, State}
     end;
 handle_info({#'basic.deliver'{delivery_tag = Tag},
@@ -197,34 +197,44 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
             #state{} = State) ->
     %% Handles incoming messages from RabbitMQ.
     {ok, AppWork} = application:get_env(queuepusherl, rabbitmq_work),
-    {ok, MaxRequeues} = application:get_env(queuepusherl, event_requeue_count),
+    {ok, MaxAttempts} = application:get_env(queuepusherl, event_attempt_count),
     WorkQueue = proplists:get_value(queue, AppWork),
     Headers = simplify_amqp_headers(AmqpHeaders),
     Requeues = amqp_headers_count_retries(Headers, WorkQueue, <<"rejected">>),
-    AttemptsLeft = MaxRequeues - Requeues,
+    FRequeues = math:log(float(Requeues) + 1) / math:log(2),
+    Attempt = round(FRequeues),
+    DelayFurher = FRequeues /= float(Attempt),
+    AttemptsLeft = MaxAttempts - Attempt,
     MsgState = #msgstate{tag = Tag,
                          retries = AttemptsLeft,
                          payload = Payload},
-    case qpusherl_event:parse(Payload) of
-        {ok, Event} ->
-            lager:notice("Processing new message: ~p (attempts left: ~p)", [Tag, AttemptsLeft]),
-            {ok, Worker} = create_worker(Tag, Event),
-            State1 = add_event(MsgState, State),
-            {noreply, store_worker(Worker, Tag, State1)};
-        {error, Reason, Message} ->
-            lager:error("Invalid qpusherl message:~n"
-                        "Payload: ~p~n"
-                        "Reason: ~p~n",
-                        [Payload, Reason]),
-            MsgState1 = add_error(MsgState, {Reason, Message}),
-            State1 = reject_event(MsgState1, State),
+    case DelayFurher of
+        true ->
+            lager:debug("Delay message ~p for exponential delay", [Tag]),
+            State1 = queue_retry_event(MsgState, State),
             {noreply, State1};
         false ->
-            lager:error("Could not execute event, retried too many times: ~n~p~nPayload: ~s",
-                        [Headers, Payload]),
-            MsgState1 = add_error(MsgState, {execution_failed, <<"Could not execute event">>}),
-            State1 = reject_event(MsgState1, State),
-            {noreply, State1}
+            case qpusherl_event:parse(Payload) of
+                {ok, Event} ->
+                    lager:notice("Processing new message: ~p (attempts left: ~p)", [Tag, AttemptsLeft]),
+                    {ok, Worker} = create_worker(Tag, Event),
+                    State1 = add_event(MsgState, State),
+                    {noreply, store_worker(Worker, Tag, State1)};
+                {error, Reason, Message} ->
+                    lager:error("Invalid qpusherl message:~n"
+                                "Payload: ~p~n"
+                                "Reason: ~p~n",
+                                [Payload, Reason]),
+                    MsgState1 = add_error(MsgState, {Reason, Message}),
+                    State1 = reject_event(MsgState1, State),
+                    {noreply, State1};
+                false ->
+                    lager:error("Could not execute event, retried too many times: ~n~p~nPayload: ~s",
+                                [Headers, Payload]),
+                    MsgState1 = add_error(MsgState, {execution_failed, <<"Could not execute event">>}),
+                    State1 = reject_event(MsgState1, State),
+                    {noreply, State1}
+            end
     end;
 handle_info(#'basic.cancel'{}, State) ->
     % Handles RabbitMQ going down. Nothing to worry about, just crash and restart.

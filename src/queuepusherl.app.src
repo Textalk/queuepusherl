@@ -9,6 +9,7 @@
 								{host, "localhost"},
 								{port, 5672}
 							   ]]},
+		   {rabbitmq_reconnect_timeout, 5000},
 		   {rabbitmq_routing_key, <<"queuepusherl">>},
 		   {rabbitmq_work, [
 							{queue, <<"qpush.work.queue">>},
@@ -24,7 +25,7 @@
 							{exchange, <<"qpush.dlx">>},
 							{timeout, 10000}
 						   ]},
-		   {event_requeue_count, 3},
+		   {event_attempt_count, 3},
 		   {error_smtp, []},
 		   {error_from, <<"admin@localhost.localdomain">>}
 		   ]},
