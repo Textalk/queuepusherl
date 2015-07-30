@@ -6,133 +6,108 @@
 -export([all/0]).
 -export([init_per_testcase/2, end_per_testcase/2]).
 
--export([simple_test/1]).
+-export([connect/1]).
 
 all() ->
     [
-     %simple_test  %% Disable test until it works
+     connect
     ].
 
-init_per_testcase(_TestCase, Config) ->
-    ClientConfig = #amqp_params_network{
-                     username = <<"guest">>,
-                     password = <<"guest">>,
-                     host = "localhost",
-                     port = 5672
-                     },
-    try
-        Exchange = <<"qpush.exchange">>,
-        {ok, Connection} = amqp_connection:start(ClientConfig),
-        {ok, Channel} = amqp_connection:open_channel(Connection),
-        #'exchange.declare_ok'{} = amqp_channel:call(Channel,
-                                                     #'exchange.declare'{
-                                                        exchange = Exchange,
-                                                        durable = true
-                                                       }),
-        #'queue.declare_ok'{queue = Queue} = amqp_channel:call(Channel,
-                                                               #'queue.declare'{
-                                                                  queue = <<"qpush.work">>,
-                                                                  durable = true
-                                                                 }),
-        Binding = #'queue.bind'{queue = Queue,
-                                exchange = Exchange,
-                                routing_key = Queue},
-        #'queue.bind_ok'{} = amqp_channel:call(Channel, Binding),
-        add_config(rabbitmq, {Connection, Channel, Exchange, Queue}, Config)
-    catch
-        Class:Error ->
-            ct:pal("Caught ~p: ~p", [Class, Error]),
-            Config
-    end.
+-define(RABBITMQ_CONFIGS, [{rabbitmq_work, [
+                                    {queue, <<"test.work">>},
+                                    {exchange, <<"test.exchange">>}
+                                   ]},
+                   {rabbitmq_fail, [
+                                    {queue, <<"test.fail">>},
+                                    {exchange, <<"test.exchange">>},
+                                    {routing_key, <<"fail_test_key">>}
+                                   ]},
+                   {rabbitmq_retry, [
+                                     {queue, <<"test.retry">>},
+                                     {exchange, <<"test.exchange">>},
+                                     {timeout, 10000}
+                                    ]},
+                   {rabbitmq_routing_key, <<"test_key">>},
+                   {rabbitmq_configs, [[
+                                        {username, <<"guest">>},
+                                        {password, <<"guest">>},
+                                        {vhost, <<"/">>},
+                                        {host, "localhost"},
+                                        {port, 5672}
+                                       ]]},
+                   {rabbitmq_reconnect_timeout, <<>>}
+                  ]). 
 
+init_per_testcase(_TestCase, Config) ->
+    Config.
 
 end_per_testcase(_TestCase, Config) ->
-    case get_config(rabbitmq, Config) of
-        false -> ok;
-        {Connection, Channel, Exchange, Queue} ->
-            Binding = #'queue.unbind'{queue = Queue,
-                                      exchange = Exchange,
-                                      routing_key = Queue},
-            #'queue.unbind_ok'{} = amqp_channel:call(Channel, Binding),
-            catch amqp_channel:close(Channel),
-            catch amqp_connection:close(Connection)
-    end,
-    del_config(rabbitmq, Config).
+    Config.
 
-simple_test(Config) ->
-    meck:new(qpusherl_app, [passthrough]),
-    meck:expect(qpusherl_app, stop,
-                fun (State) -> meck:passthrough([State]) end),
-    %meck:new(qpusherl_mq_listener, [passthrough]),
-    %meck:expect(qpusherl_mq_listener, handle_info,
-                %fun (Info, State) ->
-                        %ct:pal("Got message: ~p~n~p", [Info, State]),
-                        %meck:passthrough([Info, State])
-                %end),
-    %meck:expect(qpusherl_mq_listener, terminate,
-              %fun (Reason, State) -> meck:passthrough([Reason, State]) end),
-    meck:new(gen_smtp_client),
-    meck:expect(gen_smtp_client, send_blocking,
-                fun (Mail, _Smtp) ->
-                        ct:pal("Send e-mail: ~p", [Mail]),
-                        <<>>
-                end),
-    {ok, Started} = application:ensure_all_started(queuepusherl),
-    ct:pal("Started apps: ~p", [Started]),
-    %meck:wait(qpusherl_mq_listener, handle_info, '_', 5000),
-    case get_config(rabbitmq, Config) of
-        {_Connection, Channel, Exchange, Queue} ->
-            Payload = jiffy:encode(#{
-                        type => smtp,
-                        data => #{
-                          mail => #{
-                            from => <<"Apa Bepa <apa@bepa.baz>">>,
-                            to => [<<"apa@cepa.baz">>],
-                            body => <<"This is an email">>
-                           },
-                          smtp => #{
-                            relay => <<"">>,
-                            port => 25,
-                            username => <<"">>,
-                            password => <<"">>
-                           },
-                          error => #{
-                            to => <<"admin@bepa.baz">>,
-                            subject => <<"Error">>,
-                            body => <<"Error e-mail body">>
-                           }
-                         }
-                       }),
-            Publish = #'basic.publish'{exchange = Exchange, routing_key = Queue},
-            amqp_channel:cast(Channel, Publish, #amqp_msg{payload = Payload});
-        _ ->
-            ok
-    end,
-    timer:send_after(2000, continue),
+fake_connection() ->
     receive
-        continue -> ok
-    end,
-    meck:wait(gen_smtp_client, send_blocking, '_', 5000),
-    %ok = application:stop(queuepusherl),
-    ct:pal("Stopping all applications~n"),
-    [ catch application:stop(App) || App <- lists:reverse(Started) ],
-    ct:pal("Applications stopping.", []),
-    %meck:wait(qpusherl_mq_listener, terminate, '_', 5000),
-    meck:wait(qpusherl_app, stop, '_', 5000),
-    ct:pal("All applications stopped.", []),
-    %ok = meck:unload(qpusherl_mq_listener),
-    %ok = meck:unload(qpusherl_app),
-    %ok = meck:unload(gen_smtp_client),
-    ok.
-
-add_config(Key, Value, Config) ->
-    lists:keystore(Key, 1, Config, {Key, Value}).
-
-del_config(Key, Config) ->
-    lists:keydelete(Key, 1, Config).
-
-get_config(Key, Config) ->
-    case lists:keyfind(Key, 1, Config) of
-        {Key, Value} -> Value;
-        _ -> null
+        stop ->
+            ok;
+        Incoming ->
+            lager:info("FAKE CONNECTION: ~p", [Incoming]),
+            fake_connection()
     end.
+
+connect(_Config) ->
+    State0 = {state,
+              undefined,        % connection
+              undefined,        % channel
+              #{},              % events
+              #{},              % workers
+              sets:new(),       % oldworkers
+              ?RABBITMQ_CONFIGS % config
+             },
+
+    meck:new(amqp_connection, []),
+    meck:new(amqp_channel, []),
+
+    meck:expect(amqp_connection, start,
+                fun (_ConnParams) ->
+                        {ok, spawn(fun fake_connection/0)}
+                end),
+    meck:expect(amqp_connection, open_channel,
+                fun(_Conn) ->
+                        {ok, spawn(fun fake_connection/0)}
+                end),
+    meck:expect(amqp_channel, call, fun (_Channel, Decl) ->
+                                            case tuple_to_list(Decl) of
+                                                ['exchange.declare'|_] ->
+                                                    {'exchange.declare_ok'};
+                                                ['queue.declare'|_] ->
+                                                    {'queue.declare_ok', '_', '_', '_'};
+                                                ['queue.bind'|_] ->
+                                                    {'queue.bind_ok'}
+                                            end
+                                    end),
+    meck:expect(amqp_channel, subscribe, fun(_Channel, _Subscription, _Receiver) ->
+                                                 {'basic.consume_ok', 0}
+                                         end),
+    self() ! {'basic.consume_ok', 0},  %% We need to send this message for future use!
+    {noreply, State1} = qpusherl_mq_listener:handle_info(connect, State0),
+
+    ?assert(meck:validate(amqp_connection)),
+    ?assert(meck:validate(amqp_channel)),
+
+    meck:expect(amqp_connection, close,
+                fun (Connection) ->
+                        Connection ! stop
+                end),
+    meck:expect(amqp_channel, close,
+                fun (Channel) ->
+                        Channel ! stop
+                end),
+
+    qpusherl_mq_listener:terminate(normal, State1),
+
+    ?assert(meck:validate(amqp_connection)),
+    ?assert(meck:validate(amqp_channel)),
+
+    meck:unload(amqp_channel),
+    meck:unload(amqp_connection),
+
+    ok.
