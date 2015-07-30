@@ -35,10 +35,10 @@
 -export_type([smtp_event/0]).
 
 -spec parse(map(), [{atom(), term()}]) -> {ok, smtp_event()} | {error, Reason :: binary()}.
-parse(#{<<"mail">> := MailInfo,
-        <<"smtp">> := SmtpInfo,
-        <<"error">> := MailErrorInfo},
-     State) ->
+parse(EventInfo, State) ->
+    MailInfo = maps:get(<<"mail">>, EventInfo),
+    SmtpInfo = maps:get(<<"smtp">>, EventInfo),
+    MailErrorInfo = maps:get(<<"error">>, EventInfo),
     ErrorFrom = qpusherl_event:get_config(error_from, State),
     ErrorSmtp = qpusherl_event:get_config(error_smtp, State),
     Mail = build_mail(MailInfo),

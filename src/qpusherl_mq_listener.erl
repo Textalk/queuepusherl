@@ -46,22 +46,20 @@ start_link() ->
 
 init([]) ->
     lager:info("Message queue listener started!"),
-    Get = fun (Key, Default) ->
-                  case application:get_env(queuepusherl, Key) of
-                      {ok, Value} -> {Key, Value};
-                      error -> {Key, Default}
-                  end
+    Get = fun (Key) ->
+                  {ok, Value} = application:get_env(queuepusherl, Key),
+                  Value
           end,
-    Config = [Get(rabbitmq_fail, undefined),
-              Get(rabbitmq_work, undefined),
-              Get(rabbitmq_retry, undefined),
-              Get(rabbitmq_routing_key, undefined),
-              Get(rabbitmq_configs, undefined),
-              Get(rabbitmq_reconnect_timeout, undefined),
-              Get(event_attempt_count, undefined),
-              Get(error_from, undefined),
-              Get(error_smtp, undefined)
-             ],
+    Config = [Get(rabbitmq_fail),
+                Get(rabbitmq_work),
+                Get(rabbitmq_retry),
+                Get(rabbitmq_routing_key),
+                Get(rabbitmq_configs),
+                Get(rabbitmq_reconnect_timeout),
+                Get(event_attempt_count),
+                Get(error_from),
+                Get(error_smtp)
+               ],
     self() ! connect,
     {ok, #state{config = Config}}.
 

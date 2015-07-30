@@ -12,10 +12,16 @@
 -export_type([event/0]).
 
 get_config(Key, Config) ->
-    proplists:get_value(Key, Config, undefined).
+    proplists:get_value(Key, Config).
 
 -spec parse(binary(), [{atom(), term()}]) -> {ok, {atom(), event()}} | {error, term()}.
 parse(BinaryEvent, Config) ->
+    %% Needed config values
+    %% - error_from :: binary()
+    %% - error_smtp :: [{relay, Relay},
+    %%                  {port, Port},
+    %%                  {username, Username},
+    %%                  {password, Password}]
     try
         EventMap = jiffy:decode(BinaryEvent, [return_maps]),
         EventType = maps:get(<<"type">>, EventMap),
