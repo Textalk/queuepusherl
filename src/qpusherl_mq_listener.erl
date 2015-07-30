@@ -51,15 +51,15 @@ init([]) ->
                   Value
           end,
     Config = [Get(rabbitmq_fail),
-                Get(rabbitmq_work),
-                Get(rabbitmq_retry),
-                Get(rabbitmq_routing_key),
-                Get(rabbitmq_configs),
-                Get(rabbitmq_reconnect_timeout),
-                Get(event_attempt_count),
-                Get(error_from),
-                Get(error_smtp)
-               ],
+              Get(rabbitmq_work),
+              Get(rabbitmq_retry),
+              Get(rabbitmq_routing_key),
+              Get(rabbitmq_configs),
+              Get(rabbitmq_reconnect_timeout),
+              Get(event_attempt_count),
+              Get(error_from),
+              Get(error_smtp)
+             ],
     self() ! connect,
     {ok, #state{config = Config}}.
 
@@ -203,7 +203,7 @@ handle_info(connect, #state{connection = undefined} = State) ->
             ConM = monitor(process, Connection),
             {ok, Channel} = amqp_connection:open_channel(Connection),
             ChanM = monitor(process, Channel),
-            ok = setup_subscriptions(Channel),
+            ok = setup_subscriptions(Channel, State),
             lager:info("Established connection to RabbitMQ"),
             {noreply, State#state{connection = {Connection, ConM}, channel = {Channel, ChanM}}};
         {error, no_connection_to_mq} ->
@@ -315,11 +315,11 @@ connect([]) ->
           subscribe = false            :: boolean()
          }).
 
-setup_subscriptions(Channel) ->
-    AppWork = get_config(queuepusherl, rabbitmq_work), % <<"queuepusherl">>
-    AppFail = get_config(queuepusherl, rabbitmq_fail),
-    AppRetry = get_config(queuepusherl, rabbitmq_retry),
-    RoutingKey = get_config(queuepusherl, rabbitmq_routing_key),
+setup_subscriptions(Channel, State) ->
+    AppWork = get_config(rabbitmq_work, State), % <<"queuepusherl">>
+    AppFail = get_config(rabbitmq_fail, State),
+    AppRetry = get_config(rabbitmq_retry, State),
+    RoutingKey = get_config(rabbitmq_routing_key, State),
 
     WorkQueue = proplists:get_value(queue, AppWork),
     WorkExchange = proplists:get_value(exchange, AppWork),

@@ -16,9 +16,11 @@
 
 groups() ->
     [{smtp_event, [],
-      [execute_smtp_event_success, execute_smtp_event_failed]},
+      [execute_smtp_event_success,
+       execute_smtp_event_failed]},
      {http_event, [],
-      [execute_http_event_success, execute_http_event_failed]}
+      [execute_http_event_success,
+       execute_http_event_failed]}
     ].
 
 all() ->
@@ -115,9 +117,10 @@ execute_http_event_success(_Config) ->
     {ok, Event} = qpusherl_event:parse(?HTTP_GET_EVENT, ?PARSE_CONFIG),
 
     meck:new(httpc, []),
-    meck:expect(httpc, request, fun (_Method, _Req, _HttpOpt, _Opt) ->
-                                        {ok, {{<<"HTTP1.1">>, 200, <<"OK">>}, [], <<>>}}
-                                end),
+    meck:expect(httpc, request,
+                fun (_Method, _Req, _HttpOpt, _Opt) ->
+                        {ok, {{<<"HTTP1.1">>, 200, <<"OK">>}, [], <<>>}}
+                end),
     {ok, State0} = qpusherl_event_worker:init([self(), Event]),
     ?assertMatch({state, _, _, false, _}, State0),
     {noreply, State1} = qpusherl_event_worker:handle_info(execute, State0),
@@ -133,9 +136,10 @@ execute_smtp_event_success(_Config) ->
     {ok, Event} = qpusherl_event:parse(?MAIL_EVENT, ?PARSE_CONFIG),
 
     meck:new(gen_smtp_client, []),
-    meck:expect(gen_smtp_client, send_blocking, fun (_Mail, _Smtp) ->
-                                                        <<"fake receipt">>
-                                                end),
+    meck:expect(gen_smtp_client, send_blocking,
+                fun (_Mail, _Smtp) ->
+                        <<"fake receipt">>
+                end),
     {ok, State0} = qpusherl_event_worker:init([self(), Event]),
     ?assertMatch({state, _, _, false, _}, State0),
     {noreply, State1} = qpusherl_event_worker:handle_info(execute, State0),
@@ -152,9 +156,10 @@ execute_http_event_failed(_Config) ->
     {ok, Event} = qpusherl_event:parse(?HTTP_GET_EVENT, ?PARSE_CONFIG),
 
     meck:new(httpc, []),
-    meck:expect(httpc, request, fun (_Method, _Req, _HttpOpt, _Opt) ->
-                                        {error, <<"Test fail">>}
-                                end),
+    meck:expect(httpc, request,
+                fun (_Method, _Req, _HttpOpt, _Opt) ->
+                        {error, <<"Test fail">>}
+                end),
     {ok, State0} = qpusherl_event_worker:init([self(), Event]),
     ?assertMatch({state, _, _, false, _}, State0),
     {noreply, State1} = qpusherl_event_worker:handle_info(execute, State0),
@@ -172,9 +177,10 @@ execute_smtp_event_failed(_Config) ->
     {ok, Event} = qpusherl_event:parse(?MAIL_EVENT, ?PARSE_CONFIG),
 
     meck:new(gen_smtp_client, []),
-    meck:expect(gen_smtp_client, send_blocking, fun ({<<"<some@mail.com>">>, _To, _Body}, _Smtp) ->
-                                                        {error, test_error, <<"Test error">>}
-                                                end),
+    meck:expect(gen_smtp_client, send_blocking,
+                fun ({<<"<some@mail.com>">>, _To, _Body}, _Smtp) ->
+                        {error, test_error, <<"Test error">>}
+                end),
     {ok, State0} = qpusherl_event_worker:init([self(), Event]),
     ?assertMatch({state, _, _, false, _}, State0),
     {noreply, State1} = qpusherl_event_worker:handle_info(execute, State0),
@@ -185,9 +191,10 @@ execute_smtp_event_failed(_Config) ->
 
     ?assert(meck:validate(gen_smtp_client)),
 
-    meck:expect(gen_smtp_client, send_blocking, fun ({<<"<admin@localhost>">>, _To, _Body}, _Smtp) ->
-                                                        <<"Test receipt">>
-                                                end),
+    meck:expect(gen_smtp_client, send_blocking,
+                fun ({<<"<admin@localhost>">>, _To, _Body}, _Smtp) ->
+                        <<"Test receipt">>
+                end),
     {stop, normal, _State} = qpusherl_event_worker:handle_info(
                                {stop, [Error]},
                                State1),
