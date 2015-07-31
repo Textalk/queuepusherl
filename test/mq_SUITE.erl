@@ -7,12 +7,14 @@
 -export([init_per_testcase/2, end_per_testcase/2]).
 
 -export([connect/1]).
+-export([retry_event/1]).
 -export([deliver_test_fail/1]).
 -export([deliver_http_test_success/1]).
 
 all() ->
     [
      connect,
+     retry_event,
      deliver_test_fail,
      deliver_http_test_success
     ].
@@ -235,5 +237,68 @@ deliver_http_test_success(_Config) ->
                      after
                          500 -> timeout
                      end),
+
+    ok.
+
+retry_event(_Config) ->
+    Worker = spawn(fun () -> fake_connection([stop, {stop, fake_error}]) end),
+
+    State0 = {state,
+              {fake_connection, connM},
+              {fake_channel, chanM},
+              #{0 => {msgstate, 0, 3, <<"fake payload">>, []}},
+              maps:from_list([{Worker, 0}]),
+              sets:new(),
+              ?RABBITMQ_CONFIGS
+             },
+
+    meck:new(amqp_channel),
+
+    meck:expect(amqp_channel, call,
+                fun (fake_channel, #'basic.ack'{delivery_tag = 0}) ->
+                        ok
+                end),
+
+    {noreply, State1} = qpusherl_mq_listener:handle_info({worker_finished, Worker}, State0),
+
+    ?assertMatch({state, _, _, #{}, #{}, _, _}, State1),
+
+    ?assert(meck:validate(amqp_channel)),
+
+    State2 = {state,
+              {fake_connection, connM},
+              {fake_channel, chanM},
+              #{1 => {msgstate, 1, 0, <<"fake payload">>, []}},
+              maps:from_list([{Worker, 1}]),
+              sets:new(),
+              ?RABBITMQ_CONFIGS
+             },
+
+    meck:expect(amqp_channel, call,
+                fun (fake_channel, #'basic.ack'{delivery_tag = 1}) ->
+                        ok
+                end),
+
+    meck:expect(amqp_channel, cast,
+                fun (fake_channel,
+                     #'basic.reject'{delivery_tag = 1}) ->
+                        ok
+                end),
+
+    meck:expect(amqp_channel, cast,
+                fun (fake_channel,
+                     #'basic.publish'{routing_key = <<"fail_test_key">>},
+                     #amqp_msg{payload = <<"fake payload">>}) ->
+                        ok
+                end),
+
+    {noreply, State3} = qpusherl_mq_listener:handle_info({worker_finished, {Worker, fake_error}},
+                                                         State2),
+    {state, _, _, Events, Workers, _, _} = State3,
+    ?assertEqual(#{}, Events),
+    ?assertEqual(#{}, Workers),
+
+    ?assert(meck:validate(amqp_channel)),
+    meck:unload(amqp_channel),
 
     ok.
