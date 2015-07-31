@@ -427,8 +427,6 @@ simplify_amqp_data({array, Array}) ->
 simplify_amqp_data({table, Table}) ->
     maps:from_list(lists:map(fun simplify_amqp_data/1, Table)).
 
-amqp_headers_count_retries(undefined, _, _) ->
-    0;
 -spec amqp_headers_count_retries(map(), binary(), binary()) -> non_neg_integer().
 amqp_headers_count_retries(#{<<"x-death">> := Deaths}, Queue, Reason) ->
     lists:foldl(fun (Death, PrevCount) ->
@@ -438,7 +436,9 @@ amqp_headers_count_retries(#{<<"x-death">> := Deaths}, Queue, Reason) ->
                               <<"count">> := Count} -> Count;
                             _ -> PrevCount
                         end
-                end, 0, Deaths).
+                end, 0, Deaths);
+amqp_headers_count_retries(_Headers, _Queue, _Reason) ->
+    0.
 
 
 %%% Functions for handling workers in state

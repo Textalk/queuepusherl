@@ -7,10 +7,14 @@
 -export([init_per_testcase/2, end_per_testcase/2]).
 
 -export([connect/1]).
+-export([deliver_test_fail/1]).
+-export([deliver_http_test_success/1]).
 
 all() ->
     [
-     connect
+     connect,
+     deliver_test_fail,
+     deliver_http_test_success
     ].
 
 -define(RABBITMQ_CONFIGS, [{rabbitmq_work, [
@@ -35,8 +39,25 @@ all() ->
                                         {host, "localhost"},
                                         {port, 5672}
                                        ]]},
-                   {rabbitmq_reconnect_timeout, <<>>}
-                  ]). 
+                   {rabbitmq_reconnect_timeout, <<>>},
+                   {event_attempt_count, 3}
+                  ]).
+
+-define(HTTP_GET_EVENT, <<"{"
+                          "  \"type\": \"http\","
+                          "  \"data\": {"
+                          "    \"request\": {"
+                          "      \"method\": \"GET\","
+                          "      \"url\": \"http://localhost\","
+                          "      \"require-success\": true,"
+                          "      \"extra-headers\": { },"
+                          "      \"query\": {"
+                          "        \"foo\": \"bar\""
+                          "      }"
+                          "    },"
+                          "    \"error\": {}"
+                          "  }"
+                          "}">>).
 
 init_per_testcase(_TestCase, Config) ->
     Config.
@@ -44,15 +65,19 @@ init_per_testcase(_TestCase, Config) ->
 end_per_testcase(_TestCase, Config) ->
     Config.
 
-fake_connection() ->
+fake_connection([]) ->
+    ok;
+fake_connection([Signal|Rest]) ->
     receive
-        stop ->
-            ok;
-        Incoming ->
-            lager:info("FAKE CONNECTION: ~p", [Incoming]),
-            fake_connection()
+        Signal ->
+            fake_connection(Rest);
+        Unknown ->
+            ct:pal("Got unexpected signal: ~p", [Unknown]),
+            ?assert(false),
+            ok
     end.
 
+%% @doc This tests setting up the connection to RabbitMQ and all the queues.
 connect(_Config) ->
     State0 = {state,
               undefined,        % connection
@@ -68,24 +93,24 @@ connect(_Config) ->
 
     meck:expect(amqp_connection, start,
                 fun (_ConnParams) ->
-                        {ok, spawn(fun fake_connection/0)}
+                        {ok, spawn(fun () -> fake_connection([stop]) end)}
                 end),
     meck:expect(amqp_connection, open_channel,
                 fun(_Conn) ->
-                        {ok, spawn(fun fake_connection/0)}
+                        {ok, spawn(fun () -> fake_connection([stop]) end)}
                 end),
     meck:expect(amqp_channel, call, fun (_Channel, Decl) ->
-                                            case tuple_to_list(Decl) of
-                                                ['exchange.declare'|_] ->
-                                                    {'exchange.declare_ok'};
-                                                ['queue.declare'|_] ->
-                                                    {'queue.declare_ok', '_', '_', '_'};
-                                                ['queue.bind'|_] ->
-                                                    {'queue.bind_ok'}
+                                            case Decl of
+                                                #'exchange.declare'{} ->
+                                                    #'exchange.declare_ok'{};
+                                                #'queue.declare'{} ->
+                                                    #'queue.declare_ok'{};
+                                                #'queue.bind'{} ->
+                                                    #'queue.bind_ok'{}
                                             end
                                     end),
     meck:expect(amqp_channel, subscribe, fun(_Channel, _Subscription, _Receiver) ->
-                                                 {'basic.consume_ok', 0}
+                                                 #'basic.consume_ok'{consumer_tag = 0}
                                          end),
     self() ! {'basic.consume_ok', 0},  %% We need to send this message for future use!
     {noreply, State1} = qpusherl_mq_listener:handle_info(connect, State0),
@@ -109,5 +134,106 @@ connect(_Config) ->
 
     meck:unload(amqp_channel),
     meck:unload(amqp_connection),
+
+    ok.
+
+%% @doc This tests receiving an invalid event from RabbitMQ. This should cause a fail message to be
+%%      sent on the fail queue.
+deliver_test_fail(_Config) ->
+    State0 = {state,
+              {fake_connection, connM}, % connection
+              {fake_channel, chanM},    % channel
+              #{},                      % events
+              #{},                      % workers
+              sets:new(),               % oldworkers
+              ?RABBITMQ_CONFIGS         % config
+             },
+    BadPayload = <<"foobar">>,
+    Headers = undefined,
+
+    meck:new(amqp_channel),
+    meck:expect(amqp_channel, call,
+                fun (fake_channel, _Ack) ->
+                        ok
+                end),
+
+    meck:expect(amqp_channel, cast,
+                fun (fake_channel,
+                     #'basic.publish'{routing_key = <<"fail_test_key">>},
+                     #amqp_msg{payload = <<"foobar">>}) ->
+                        ok
+                end),
+
+    {noreply, State1} = qpusherl_mq_listener:handle_info({#'basic.deliver'{delivery_tag = 0},
+                                                          #amqp_msg{props = #'P_basic'{
+                                                                               headers = Headers
+                                                                              },
+                                                                    payload = BadPayload}},
+                                                         State0),
+    ?assertMatch({state,
+                  {fake_connection, connM},
+                  {fake_channel, chanM},
+                  #{}, #{},
+                  _, _}, State1),
+
+    ?assert(meck:validate(amqp_channel)),
+    meck:unload(amqp_channel),
+
+    ok.
+
+%% @doc This tests receiving a valid HTTP GET event from RabbitMQ. This message should cause a
+%%      worker to be started with the parsed version of the event as argument and then the worker
+%%      should be added to the to the states dict of workers.
+deliver_http_test_success(_Config) ->
+    State0 = {state,
+              {fake_connection, connM}, % connection
+              {fake_channel, chanM},    % channel
+              #{},                      % events
+              #{},                      % workers
+              sets:new(),               % oldworkers
+              ?RABBITMQ_CONFIGS         % config
+             },
+    BadPayload = ?HTTP_GET_EVENT,
+    Headers = undefined,
+    Tag = 0,
+
+    meck:new(qpusherl_worker_sup, []),
+
+    meck:expect(qpusherl_worker_sup, create_child,
+                fun (_Self, Event) ->
+                        ?assertMatch({http, {http_event,
+                                             #{method := get,
+                                               url := <<"http://localhost/?foo=bar">>}}}, Event),
+                        {ok, spawn(fun () -> fake_connection([execute, stop]) end)}
+                end),
+
+    {noreply, State1} = qpusherl_mq_listener:handle_info(
+                          {#'basic.deliver'{delivery_tag = Tag},
+                           #amqp_msg{props = #'P_basic'{headers = Headers},
+                                     payload = BadPayload}},
+                          State0),
+    {state, _, _, Events, Workers, _, _} = State1,
+
+    [FakeWorker] = maps:keys(Workers),
+    ?assert(is_pid(FakeWorker)),
+    ?assertMatch({state,
+                  {fake_connection, connM},
+                  {fake_channel, chanM},
+                  #{}, #{},
+                  _, _}, State1),
+    case maps:find(Tag, Events) of
+        {ok, MsgState} -> ?assertMatch({msgstate, Tag, 3, _, []}, MsgState)
+    end,
+
+    ?assert(meck:validate(qpusherl_worker_sup)),
+    meck:unload(qpusherl_worker_sup),
+
+    FakeWorker ! stop,
+
+    ?assertEqual(ok, receive
+                         {'DOWN', _MRef, process, FakeWorker, normal} -> ok
+                     after
+                         500 -> timeout
+                     end),
 
     ok.
