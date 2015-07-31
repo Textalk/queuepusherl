@@ -412,7 +412,6 @@ setup_subscription(Channel, #subscription_info{queue = Queue,
 simplify_amqp_headers(undefined) ->
     undefined;
 simplify_amqp_headers(Headers) ->
-    lager:info("Parse headers: ~p", [Headers]),
     simplify_amqp_data({table, Headers}).
 
 simplify_amqp_data({Name, Key, Value}) ->

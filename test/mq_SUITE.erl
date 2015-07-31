@@ -196,7 +196,19 @@ deliver_http_test_success(_Config) ->
               ?RABBITMQ_CONFIGS         % config
              },
     BadPayload = ?HTTP_GET_EVENT,
-    Headers = undefined,
+    Headers = [{<<"x-death">>, array,
+                [{table,
+                  [{<<"count">>, long, 1},
+                   {<<"exchange">>, longstr, <<"test.exchange">>},
+                   {<<"queue">>, longstr, <<"test.work">>},
+                   {<<"reason">>, longstr, <<"rejected">>},
+                   {<<"routing-keys">>, array, [{longstr, <<"test_key">>}]},
+                   {<<"time">>, timestamp, 420000}
+                  ]
+                 }
+                ]
+               }
+              ],
     Tag = 0,
 
     meck:new(qpusherl_worker_sup, []),
@@ -224,7 +236,7 @@ deliver_http_test_success(_Config) ->
                   #{}, #{},
                   _, _}, State1),
     case maps:find(Tag, Events) of
-        {ok, MsgState} -> ?assertMatch({msgstate, Tag, 3, _, []}, MsgState)
+        {ok, MsgState} -> ?assertMatch({msgstate, Tag, 2, _, []}, MsgState)
     end,
 
     ?assert(meck:validate(qpusherl_worker_sup)),
@@ -285,6 +297,7 @@ retry_event(_Config) ->
                         ok
                 end),
 
+    %% Since the msgstate has 0 in retries we also expect a message on the fail queue.
     meck:expect(amqp_channel, cast,
                 fun (fake_channel,
                      #'basic.publish'{routing_key = <<"fail_test_key">>},
