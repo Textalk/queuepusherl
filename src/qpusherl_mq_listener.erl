@@ -63,6 +63,7 @@ init([]) ->
     self() ! connect,
     {ok, #state{config = Config}}.
 
+-spec get_config(atom(), #state{}) -> term().
 get_config(Key, #state{config = Config}) ->
     proplists:get_value(Key, Config, undefined).
 
@@ -85,12 +86,14 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @doc Acknowledge completion event to rabbitmq
+-spec ack_event(#msgstate{}, #state{}) -> #state{}.
 ack_event(#msgstate{tag = Tag}, #state{channel = {Channel, _}} = State) ->
     Ack = #'basic.ack'{delivery_tag = Tag},
     amqp_channel:call(Channel, Ack),
     State.
 
 %% @doc Move the event to the retry queue
+-spec queue_retry_event(#msgstate{}, #state{}) -> #state{}.
 queue_retry_event(#msgstate{tag = Tag, errors = Errors} = MsgState,
                   #state{channel = {Channel, _}} = State) ->
     case Errors of
@@ -102,6 +105,7 @@ queue_retry_event(#msgstate{tag = Tag, errors = Errors} = MsgState,
     remove_event(MsgState, State).
 
 %% @doc Reject event without further attempts to retry.
+-spec reject_event(#msgstate{}, #state{}) -> #state{}.
 reject_event(#msgstate{tag = Tag} = MsgState, State) ->
     lager:info("Stop retrying event (~p)", [Tag]),
     State1 = ack_event(MsgState, State),
@@ -109,6 +113,7 @@ reject_event(#msgstate{tag = Tag} = MsgState, State) ->
     remove_event(MsgState, State2).
 
 %% @doc Send a new message to the fail queue.
+-spec send_fail(#msgstate{}, #state{}) -> #state{}.
 send_fail(#msgstate{payload = Payload, errors = Errors},
           #state{channel = {Channel, _}} = State) ->
     lager:info("Sending fail-event to message queue", []),
@@ -271,6 +276,7 @@ handle_info(Info, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+-spec create_worker(rabbitmq_tag(), qpusherl_event:event(), #state{}) -> {'ok', pid()}.
 create_worker(Tag, Event, #state{config = _Config}) ->
     {ok, Worker} = qpusherl_worker_sup:create_child(self(), Event),
     lager:debug("Started new worker! (~p :: ~p)", [Tag, Worker]),
@@ -315,6 +321,7 @@ connect([]) ->
           subscribe = false            :: boolean()
          }).
 
+-spec setup_subscriptions(pid(), #state{}) -> 'ok'.
 setup_subscriptions(Channel, State) ->
     AppWork = get_config(rabbitmq_work, State), % <<"queuepusherl">>
     AppFail = get_config(rabbitmq_fail, State),
@@ -362,6 +369,7 @@ setup_subscriptions(Channel, State) ->
     ok.
 
 
+-spec setup_subscription(pid(), #subscription_info{}) -> 'ok' | {'error', Reason :: term()}.
 setup_subscription(Channel, #subscription_info{queue = Queue,
                                                queue_durable = DurableQ,
                                                exchange = Exchange,
@@ -400,6 +408,7 @@ setup_subscription(Channel, #subscription_info{queue = Queue,
         true -> ok
     end.
 
+-spec simplify_amqp_headers('undefined' | list()) -> map().
 simplify_amqp_headers(undefined) ->
     undefined;
 simplify_amqp_headers(Headers) ->
@@ -420,6 +429,7 @@ simplify_amqp_data({table, Table}) ->
 
 amqp_headers_count_retries(undefined, _, _) ->
     0;
+-spec amqp_headers_count_retries(map(), binary(), binary()) -> non_neg_integer().
 amqp_headers_count_retries(#{<<"x-death">> := Deaths}, Queue, Reason) ->
     lists:foldl(fun (Death, PrevCount) ->
                         case Death of
@@ -434,10 +444,12 @@ amqp_headers_count_retries(#{<<"x-death">> := Deaths}, Queue, Reason) ->
 %%% Functions for handling workers in state
 
 %% @doc Add worker to the state
+-spec store_worker(pid(), rabbitmq_tag(), #state{}) -> #state{}.
 store_worker(Worker, Tag, #state{workers = Workers} = State) ->
     State#state{workers = maps:put(Worker, Tag, Workers)}.
 
 %% @doc Remove worker from state
+-spec remove_worker(pid(), #state{}) -> #state{}.
 remove_worker(Worker, State = #state{workers = Workers}) ->
     State1 = case get_worker_event(Worker, State) of
                  {ok, MsgState} ->
@@ -448,6 +460,7 @@ remove_worker(Worker, State = #state{workers = Workers}) ->
     State1#state{workers = maps:remove(Worker, Workers)}.
 
 %% @doc Move worker from workers to oldworkers for it to wait for the worker process to terminate
+-spec retire_worker(pid(), #state{}) -> #state{}.
 retire_worker(Worker, #state{oldworkers = OldWorkers} = State) ->
     case is_worker(Worker, State) of
         true ->
@@ -457,12 +470,15 @@ retire_worker(Worker, #state{oldworkers = OldWorkers} = State) ->
             State
     end.
 
+-spec is_worker(pid(), #state{}) -> boolean.
 is_worker(Worker, #state{workers = Workers}) ->
     maps:is_key(Worker, Workers).
 
+-spec is_old_worker(pid(), #state{}) -> boolean.
 is_old_worker(Worker, #state{oldworkers = OldWorkers}) ->
     sets:is_element(Worker, OldWorkers).
 
+-spec clear_old_worker(pid(), #state{}) -> #state{}.
 clear_old_worker(Worker, #state{oldworkers = OldWorkers} = State) ->
     State1 = remove_worker(Worker, State),
     State1#state{oldworkers = sets:del_element(Worker, OldWorkers)}.
@@ -470,9 +486,11 @@ clear_old_worker(Worker, #state{oldworkers = OldWorkers} = State) ->
 
 %%% Functions for handling events in state
 
+-spec get_event(non_neg_integer(), #state{}) -> {'ok', qpusherl_event:event()} | 'error'.
 get_event(Tag, #state{events = Events}) ->
     maps:find(Tag, Events).
 
+-spec get_worker_event(non_neg_integer(), #state{}) -> {'ok', qpusherl_event:event()} | 'error'.
 get_worker_event(Worker, #state{workers = Workers} = State) ->
     case maps:find(Worker, Workers) of
         {ok, Tag} ->
@@ -481,14 +499,17 @@ get_worker_event(Worker, #state{workers = Workers} = State) ->
             error
     end.
 
+-spec add_event(#msgstate{}, #state{}) -> #state{}.
 add_event(#msgstate{tag = Tag} = MsgState, #state{events = Events} = State) ->
     State#state{events = maps:put(Tag, MsgState, Events)}.
 
+-spec remove_event(#msgstate{}, #state{}) -> #state{}.
 remove_event(#msgstate{tag = Tag}, State) ->
     remove_event(Tag, State);
 remove_event(Tag, #state{events = Events} = State) ->
     State#state{events = maps:remove(Tag, Events)}.
 
+-spec add_error(#msgstate{}, []) -> #msgstate{}.
 add_error(#msgstate{errors = Errors} = MsgState, Error) ->
     MsgState#msgstate{errors = [Error|Errors]}.
 
