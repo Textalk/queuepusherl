@@ -48,7 +48,7 @@ init([]) ->
     lager:info("Message queue listener started!"),
     Get = fun (Key) ->
                   {ok, Value} = application:get_env(queuepusherl, Key),
-                  Value
+                  {Key, Value}
           end,
     Config = [Get(rabbitmq_fail),
               Get(rabbitmq_work),
@@ -412,6 +412,7 @@ setup_subscription(Channel, #subscription_info{queue = Queue,
 simplify_amqp_headers(undefined) ->
     undefined;
 simplify_amqp_headers(Headers) ->
+    lager:info("Parse headers: ~p", [Headers]),
     simplify_amqp_data({table, Headers}).
 
 simplify_amqp_data({Name, Key, Value}) ->
