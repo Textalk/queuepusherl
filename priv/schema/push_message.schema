@@ -10,6 +10,31 @@
         "extemailarray": {
             "type": "array",
             "items": { "$ref": "#/definitions/extemail" }
+        },
+        "mailbody": {
+            "oneOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "headers": {
+                            "type": "object",
+                            "properties": {
+                                "Content-Type": { "type": "string" },
+                                "Content-Disposition": { "type": "string" },
+                                "Content-Filename": { "type": "string" },
+                                "Content-Encoding": { "enum": [ "base64" ] }
+                            }
+                        },
+                        "body": {
+                            "$ref": "#/definitions/mailbody"
+                        }
+                    },
+                    "required": [ "body", "headers" ]
+                }
+            ]
         }
     },
     "oneOf": [
@@ -26,13 +51,15 @@
                                 "to": { "$ref": "#/definitions/extemailarray" },
                                 "cc": { "$ref": "#/definitions/extemailarray" },
                                 "bcc": { "$ref": "#/definitions/extemailarray" },
+                                "subject": { "type": "string"},
+                                "content-type": { "type": "string"},
                                 "extra-headers": {
                                     "type": "object",
                                     "patternProperties": {
                                         "[^ \t]+": { "type": "string" }
                                     }
                                 },
-                                "body": { "type": "string" }
+                                "body": { "$ref": "#/definitions/mailbody" }
                             },
                             "required": [ "from", "extra-headers", "body" ],
                             "oneOf": [
