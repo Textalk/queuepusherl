@@ -30,13 +30,21 @@
 
 parse_mail_test() ->
     TestData = jiffy:encode(?MAIL_TEST_DATA),
-    {ok, {smtp, Mail, _SMTP, Error}} = qpusherl_event:parse(TestData),
-    ?assertMatch({<<"<alice@example.com>">>,
+    {ok,
+     {smtp, {smtp_event, Mail, _SMTP, Error}}
+    } = qpusherl_event:parse(TestData, [{error_from, <<"<a@b.c>">>},
+                                        {error_smtp, [{relay, <<>>},
+                                                      {port, 25},
+                                                      {username, <<>>},
+                                                      {password, <<>>}]}]),
+    ?assertMatch({mail, <<"<alice@example.com>">>,
                   [<<"<bob@example.com>">>,
                    <<"<cesar@example.com>">>],
-                 _MailBody}, Mail),
+                  _MailBody}, Mail),
     ?assertMatch({mailerror,
                   <<"admin@example.com">>,
+                  <<"<a@b.c>">>,
                   <<"Subject line of error e-mail">>,
-                 _MailBody}, Error),
+                  <<"Body of error e-mail">>,
+                  _MailBody}, Error),
     ok.

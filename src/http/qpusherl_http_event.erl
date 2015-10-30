@@ -22,12 +22,12 @@ parse(#{<<"request">> := Request}, _Config) ->
 -spec build_request(map()) -> {'ok', http_req()} | {'error', term()}.
 build_request(EventData) ->
     Defaults = #{<<"method">> => <<"GET">>,
-                <<"extra-headers">> => #{},
-                <<"content-type">> => <<"text/plain">>,
-                <<"require-success">> => false,
-                <<"query">> => #{},
-                <<"data">> => #{},
-                <<"url">> => undefined},
+                 <<"extra-headers">> => #{},
+                 <<"content-type">> => <<"text/plain">>,
+                 <<"require-success">> => false,
+                 <<"query">> => #{},
+                 <<"data">> => #{},
+                 <<"url">> => undefined},
     #{<<"method">> := InMethod,
       <<"extra-headers">> := InHeaders,
       <<"content-type">> := InContentType,
