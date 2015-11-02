@@ -22,10 +22,10 @@
                         "headers": {
                             "type": "object",
                             "properties": {
-                                "Content-Type": { "type": "string" },
-                                "Content-Disposition": { "type": "string" },
-                                "Content-Filename": { "type": "string" },
-                                "Content-Encoding": { "enum": [ "base64" ] }
+                                "content-type": { "type": "string" },
+                                "content-disposition": { "type": "string" },
+                                "content-filename": { "type": "string" },
+                                "content-encoding": { "enum": [ "base64" ] }
                             }
                         },
                         "body": {
