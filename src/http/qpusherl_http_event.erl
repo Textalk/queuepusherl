@@ -23,7 +23,7 @@ parse(#{<<"request">> := Request}, _Config) ->
 build_request(EventData) ->
     Defaults = #{<<"method">> => <<"GET">>,
                  <<"extra-headers">> => #{},
-                 <<"content-type">> => <<"text/plain">>,
+                 <<"content-type">> => undefined,
                  <<"require-success">> => false,
                  <<"query">> => #{},
                  <<"data">> => #{},
@@ -63,12 +63,8 @@ build_request(EventData) ->
                                 <<>>
                         end}
                end,
-    Data = case InData of
-               _ when is_map(InData) -> cow_qs:qs(maps:to_list(InData));
-               _ -> InData
-           end,
+    {ContentType, Data} = encode_data(InContentType, InData),
     Headers = InHeaders,
-    ContentType = InContentType,
     {ok, #{method => Method,
            headers => Headers,
            content_type => ContentType,
@@ -78,6 +74,18 @@ build_request(EventData) ->
                        #{} -> cow_qs:qs(maps:to_list(Data));
                        _ when is_binary(Data) -> Data
                    end}}.
+
+encode_data(ContentType, Data) when is_map(Data) ->
+    case ContentType of
+        <<"application/json">> ->
+            {ContentType, jiffy:encode(Data)};
+        _ when ContentType == undefined; ContentType == <<"application/x-www-url-form-encoded">> ->
+            {<<"application/x-www-url-form-encoded">>, cow_qs:qs(maps:to_list(Data))}
+    end;
+encode_data(undefined, Data) when is_binary(Data) ->
+    {<<"text/plain">>, Data};
+encode_data(ContentType, Data) when is_binary(Data) ->
+    {ContentType, Data}.
 
 -spec get_request(http_event()) -> http_req().
 get_request(#http_event{request = Req}) ->

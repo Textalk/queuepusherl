@@ -8,6 +8,7 @@
 
 -export([parse_test_1/1]).
 -export([parse_test_2/1]).
+-export([parse_test_3/1]).
 -export([process_request_success/1]).
 -export([process_request_fail/1]).
 
@@ -15,6 +16,7 @@ all() ->
     [
      parse_test_1,
      parse_test_2,
+     parse_test_3,
      process_request_success,
      process_request_fail
     ].
@@ -55,6 +57,21 @@ parse_test_2(_Config) ->
                    require_success := false,
                    url := <<"https://localhost/#foobar">>},
                  Req),
+    ok.
+
+parse_test_3(_Config) ->
+    {ok, Event} = qpusherl_http_event:parse(
+                    #{<<"request">> =>
+                      #{<<"method">> => <<"GET">>,
+                        <<"content-type">> => <<"application/json">>,
+                        <<"data">> => #{<<"foo">> => <<"bar">>},
+                        <<"url">> => <<"http://localhost:8000/foo">>
+                       }
+                     },
+                    []
+                   ),
+    Req = qpusherl_http_event:get_request(Event),
+    ?assertMatch(#{data := <<"{\"foo\":\"bar\"}">>}, Req),
     ok.
 
 process_request_success(_Config) ->
