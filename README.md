@@ -31,7 +31,7 @@ will be sent to "admin@example.com" instead with the error body as message.
   "data": {
     "mail": {
       "from": "Us <us@example.com>",
-      "to": ["User <them@example.com">],
+      "to": ["User <them@example.com>"],
       "subject": "Subject of mail",
       "content-type": "multipart/alternative",
       "extra-headers": {},
