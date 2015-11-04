@@ -23,7 +23,7 @@ all() ->
                                     {queue, <<"test.work">>},
                                     {exchange, <<"test.exchange">>}
                                    ]},
-                   {rabbitmq_fail, [
+                   {rabbitmq_response, [
                                     {queue, <<"test.fail">>},
                                     {exchange, <<"test.exchange">>},
                                     {routing_key, <<"fail_test_key">>}
@@ -265,6 +265,11 @@ retry_event(_Config) ->
              },
 
     meck:new(amqp_channel),
+
+    meck:expect(amqp_channel, cast,
+                fun (fake_channel, #'basic.publish'{}, #amqp_msg{}) ->
+                        ok
+                end),
 
     meck:expect(amqp_channel, call,
                 fun (fake_channel, #'basic.ack'{delivery_tag = 0}) ->

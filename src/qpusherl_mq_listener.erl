@@ -50,7 +50,7 @@ init([]) ->
                   {ok, Value} = application:get_env(queuepusherl, Key),
                   {Key, Value}
           end,
-    Config = [Get(rabbitmq_fail),
+    Config = [Get(rabbitmq_response),
               Get(rabbitmq_work),
               Get(rabbitmq_retry),
               Get(rabbitmq_routing_key),
@@ -109,30 +109,33 @@ queue_retry_event(#msgstate{tag = Tag, errors = Errors} = MsgState,
 reject_event(#msgstate{tag = Tag} = MsgState, State) ->
     lager:info("Stop retrying event (~p)", [Tag]),
     State1 = ack_event(MsgState, State),
-    State2 = send_fail(MsgState, State1),
+    State2 = send_return(false, MsgState, State1),
     remove_event(MsgState, State2).
 
-%% @doc Send a new message to the fail queue.
--spec send_fail(#msgstate{}, #state{}) -> #state{}.
-send_fail(#msgstate{payload = Payload, errors = Errors},
-          #state{channel = {Channel, _}} = State) ->
-    lager:info("Sending fail-event to message queue", []),
-    AppFail = get_config(rabbitmq_fail, State),
-    Exchange = proplists:get_value(exchange, AppFail),
-    RoutingKey = proplists:get_value(routing_key, AppFail),
+%% %% @doc Send a new message to the response queue.
+%% -spec send_return(#msgstate{}, #state{}) -> #state{}.
+%% send_return(#msgstate{payload = Payload, errors = Errors},
+%%           #state{channel = {Channel, _}} = State) ->
+send_return(Success, #msgstate{payload = Payload, errors = Errors},
+            #state{channel = {Channel, _}} = State0) ->
+    lager:info("Sending return-event to message queue", []),
+    AppResponse = get_config(rabbitmq_response, State0),
+    Exchange = proplists:get_value(exchange, AppResponse),
+    RoutingKey = proplists:get_value(routing_key, AppResponse),
     Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
-    AmqpErrors = [{<<"qpush-error">>, array,
-                   lists:map(fun (E) ->
-                                     {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
-                             end,
-                             [Errors])}],
+    AmqpHeaders = [{<<"x-qpush-success">>, boolean, Success},
+                   {<<"x-qpush-error">>, array,
+                    lists:map(fun (E) ->
+                                      {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
+                              end,
+                              [Errors])}],
     Props = #'P_basic'{
                delivery_mode = 2,
-               headers = AmqpErrors
+               headers = AmqpHeaders
               },
     Msg = #amqp_msg{props = Props, payload = Payload},
     amqp_channel:cast(Channel, Publish, Msg),
-    State.
+    State0.
 
 % @doc Handle incoming messages from system, RabbitMQ and workers.
 handle_info({'DOWN', MRef, process, _Worker, Reason},
@@ -190,9 +193,10 @@ handle_info({worker_finished, Worker}, #state{} = State) ->
                  {ok, MsgState} ->
                      %% Event finished!
                      lager:info("Worker finished (~p)", [Worker]),
-                     State2 = ack_event(MsgState, State),
+                     State2 = send_return(true, MsgState, State),
+                     State3 = ack_event(MsgState, State2),
                      Worker ! stop,
-                     retire_worker(Worker, State2);
+                     retire_worker(Worker, State3);
                  error ->
                      lager:error("Unknown worker finished! (~p)", [Worker]),
                      State
@@ -324,16 +328,16 @@ connect([]) ->
 -spec setup_subscriptions(pid(), #state{}) -> 'ok'.
 setup_subscriptions(Channel, State) ->
     AppWork = get_config(rabbitmq_work, State), % <<"queuepusherl">>
-    AppFail = get_config(rabbitmq_fail, State),
+    AppResponse = get_config(rabbitmq_response, State),
     AppRetry = get_config(rabbitmq_retry, State),
     RoutingKey = get_config(rabbitmq_routing_key, State),
 
     WorkQueue = proplists:get_value(queue, AppWork),
     WorkExchange = proplists:get_value(exchange, AppWork),
 
-    FailQueue = proplists:get_value(queue, AppFail),
-    FailExchange = proplists:get_value(exchange, AppFail),
-    FailKey = proplists:get_value(routing_key, AppFail),
+    ResponseQueue = proplists:get_value(queue, AppResponse),
+    ResponseExchange = proplists:get_value(exchange, AppResponse),
+    ResponseKey = proplists:get_value(routing_key, AppResponse),
 
     RetryQueue = proplists:get_value(queue, AppRetry),
     RetryExchange = proplists:get_value(exchange, AppRetry),
@@ -341,9 +345,9 @@ setup_subscriptions(Channel, State) ->
 
     lager:info("Setting up subscription:~n"
                "Work queue: ~s @ ~s~n"
-               "Fail queue: ~s @ ~s~n"
+               "Response queue: ~s @ ~s~n"
                "Retry queue: ~s @ ~s", [WorkQueue, WorkExchange,
-                                        FailQueue, FailExchange,
+                                        ResponseQueue, ResponseExchange,
                                         RetryQueue, RetryExchange]),
 
     ok = setup_subscription(Channel, #subscription_info{queue = WorkQueue,
@@ -354,11 +358,11 @@ setup_subscriptions(Channel, State) ->
                                                         routing_key = RoutingKey,
                                                         subscribe = true}),
 
-    ok = setup_subscription(Channel, #subscription_info{queue = FailQueue,
+    ok = setup_subscription(Channel, #subscription_info{queue = ResponseQueue,
                                                         queue_durable = true,
-                                                        exchange = FailExchange,
+                                                        exchange = ResponseExchange,
                                                         exchange_durable = true,
-                                                        routing_key = FailKey}),
+                                                        routing_key = ResponseKey}),
 
     ok = setup_subscription(Channel, #subscription_info{queue = RetryQueue,
                                                         exchange = RetryExchange,

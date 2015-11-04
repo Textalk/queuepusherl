@@ -10,9 +10,9 @@ RabbitMQ
 Queuepusherl uses two exchanges:
 
   * `qpush.exchange` - Used for receiving messages and returning error reports.
-    * `qpush.work.queue` - This is the queue where messages posted to
+    * `qpush.queue.work` - This is the queue where messages posted to
       `qpush.exchange` with the key `queuepush` will end up.
-    * `qpush.fail.queue` - Failed requests are posted to this queue.
+    * `qpush.queue.response` - Failed requests are posted to this queue.
   * `qpush.dlx` - This is a dead-letter exchange just for internal use, it is
     used to delay requeuing of messages if they fail.
 
