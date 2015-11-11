@@ -19,10 +19,11 @@
 -type rabbitmq_tag() :: integer().
 
 -record(msgstate, {
-          tag         :: rabbitmq_tag(),
-          retries = 0 :: non_neg_integer(),
-          payload     :: binary(),
-          errors = [] :: [{atom(), binary()}]
+          tag          :: rabbitmq_tag(),
+          retries = 0  :: non_neg_integer(),
+          payload      :: binary(),
+          headers = [] :: term(),
+          errors = []  :: [{atom(), binary()}]
          }).
 -type msgstate() :: #msgstate{}.
 
@@ -116,7 +117,7 @@ reject_event(#msgstate{tag = Tag} = MsgState, State) ->
 %% -spec send_return(#msgstate{}, #state{}) -> #state{}.
 %% send_return(#msgstate{payload = Payload, errors = Errors},
 %%           #state{channel = {Channel, _}} = State) ->
-send_return(Success, #msgstate{payload = Payload, errors = Errors},
+send_return(Success, #msgstate{payload = Payload, headers = OrgHeaders, errors = Errors},
             #state{channel = {Channel, _}} = State0) ->
     lager:info("Sending return-event to message queue", []),
     AppResponse = get_config(rabbitmq_response, State0),
@@ -131,7 +132,7 @@ send_return(Success, #msgstate{payload = Payload, errors = Errors},
                               [Errors])}],
     Props = #'P_basic'{
                delivery_mode = 2,
-               headers = AmqpHeaders
+               headers = OrgHeaders ++ AmqpHeaders
               },
     Msg = #amqp_msg{props = Props, payload = Payload},
     amqp_channel:cast(Channel, Publish, Msg),
@@ -234,7 +235,11 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
     AttemptsLeft = MaxAttempts - Attempt,
     MsgState = #msgstate{tag = Tag,
                          retries = AttemptsLeft,
-                         payload = Payload},
+                         payload = Payload,
+                         headers = case AmqpHeaders of
+                                       undefined -> [];
+                                       _ -> AmqpHeaders
+                                   end},
     case DelayFurher of
         true ->
             lager:debug("Delay message ~p for exponential delay", [Tag]),

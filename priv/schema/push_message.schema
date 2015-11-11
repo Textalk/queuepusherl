@@ -144,12 +144,6 @@
                     }
                 }
             }
-        },
-        "properties": {
-            "metadata": {
-                "type": "object",
-                "additionalProperties": true
-            }
         }
     ]
 }

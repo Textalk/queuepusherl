@@ -236,7 +236,7 @@ deliver_http_test_success(_Config) ->
                   #{}, #{},
                   _, _}, State1),
     case maps:find(Tag, Events) of
-        {ok, MsgState} -> ?assertMatch({msgstate, Tag, 2, _, []}, MsgState)
+        {ok, MsgState} -> ?assertMatch({msgstate, Tag, 2, _, _, []}, MsgState)
     end,
 
     ?assert(meck:validate(qpusherl_worker_sup)),
@@ -258,7 +258,7 @@ retry_event(_Config) ->
     State0 = {state,
               {fake_connection, connM},
               {fake_channel, chanM},
-              #{0 => {msgstate, 0, 3, <<"fake payload">>, []}},
+              #{0 => {msgstate, 0, 3, <<"fake payload">>, [], []}},
               maps:from_list([{Worker, 0}]),
               sets:new(),
               ?RABBITMQ_CONFIGS
@@ -285,7 +285,7 @@ retry_event(_Config) ->
     State2 = {state,
               {fake_connection, connM},
               {fake_channel, chanM},
-              #{1 => {msgstate, 1, 0, <<"fake payload">>, []}},
+              #{1 => {msgstate, 1, 0, <<"fake payload">>, [], []}},
               maps:from_list([{Worker, 1}]),
               sets:new(),
               ?RABBITMQ_CONFIGS
