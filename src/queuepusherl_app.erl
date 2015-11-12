@@ -1,4 +1,4 @@
--module(qpusherl_app).
+-module(queuepusherl_app).
 -behaviour(application).
 
 -export([start/2]).

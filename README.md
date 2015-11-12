@@ -75,7 +75,7 @@ A simple HTTP POST to `http://example.com` with the body set to `foo=bar`.
       "url": "http://example.com",
       "require-success": true,
       "extra-headers": {},
-      "content-type": "application/x-www-form-encoded",
+      "content-type": "application/x-www-form-urlencoded",
       "data": {
         "foo": "bar"
       }
@@ -83,3 +83,8 @@ A simple HTTP POST to `http://example.com` with the body set to `foo=bar`.
   }
 }
 ```
+
+Versioning
+----------
+
+Queuepusherl intends to employs [Semantic Versioning 2.0.0](http://semver.org/spec/v2.0.0.html)

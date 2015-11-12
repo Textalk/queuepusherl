@@ -28,7 +28,7 @@ parse(BinaryEvent, Config) ->
         EventData = maps:get(<<"data">>, EventMap),
         case maps:find(EventType, ?EVENT_TYPES) of
             {ok, Module} ->
-                AType = list_to_atom(unicode:characters_to_list(EventType)),
+                AType = list_to_existing_atom(unicode:characters_to_list(EventType)),
                 case Module:parse(EventData, Config) of
                     {ok, Event} -> {ok, {AType, Event}};
                     {error, Reason0} -> {error, failed_parse, Reason0}
@@ -38,11 +38,9 @@ parse(BinaryEvent, Config) ->
                 {error, no_parse_module, <<"Could not parse event type, ", EventType/binary>>}
         end
     catch
-        error:Reason1 ->
-            {Explaination, _Trace} = extend_error(Reason1, erlang:get_stacktrace()),
-            {error, Reason1, Explaination};
-        throw:Reason1 ->
-            {Explaination, _Trace} = extend_error(Reason1, erlang:get_stacktrace()),
+        _:Reason1 ->
+            {Explaination, Trace} = extend_error(Reason1, erlang:get_stacktrace()),
+            lager:debug("Error logged: ~p", [Trace]),
             {error, Reason1, Explaination}
     end.
 

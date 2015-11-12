@@ -63,29 +63,53 @@ build_request(EventData) ->
                                 <<>>
                         end}
                end,
-    {ContentType, Data} = encode_data(InContentType, InData),
     Headers = InHeaders,
-    {ok, #{method => Method,
-           headers => Headers,
-           content_type => ContentType,
-           require_success => RequireSuccess,
-           url => format_url(URLparts),
-           data => case Data of
-                       #{} -> cow_qs:qs(maps:to_list(Data));
-                       _ when is_binary(Data) -> Data
-                   end}}.
+    case encode_data(InContentType, InData) of
+        {ok, {ContentType, Data}} ->
+            {ok, #{method => Method,
+                   headers => Headers,
+                   content_type => ContentType,
+                   require_success => RequireSuccess,
+                   url => format_url(URLparts),
+                   data => Data}};
+        Error -> Error
+    end.
+
+url_encode(Map) when is_map(Map) ->
+    url_encode(maps:to_list(Map));
+url_encode(List) ->
+    case lists:foldr(
+           fun (_, {error, Reason}) ->
+                   {error, Reason};
+               ({K, V}, Acc) when is_integer(V) ->
+                   [{K, integer_to_binary(V)} | Acc];
+               ({K, V}, Acc) when is_binary(V) ->
+                   [{K, V} | Acc];
+               (_, _) ->
+                   {error, {invalid_message, <<"Data can only contain integer and binaries">>}}
+           end,
+           [],
+           List) of
+        {error, _} = Error -> Error;
+        List1 -> {ok, cow_qs:qs(List1)}
+    end.
 
 encode_data(ContentType, Data) when is_map(Data) ->
     case ContentType of
         <<"application/json">> ->
-            {ContentType, jiffy:encode(Data)};
-        _ when ContentType == undefined; ContentType == <<"application/x-www-url-form-encoded">> ->
-            {<<"application/x-www-url-form-encoded">>, cow_qs:qs(maps:to_list(Data))}
+            {ok, {ContentType, jiffy:encode(maps:to_list(Data))}};
+        _ when ContentType == undefined; ContentType == <<"application/x-www-form-urlencoded">> ->
+            case url_encode(Data) of
+                {ok, Data0} -> {ok, {<<"application/x-www-form-urlencoded">>, Data0}};
+                Error -> Error
+            end;
+        _ ->
+            {error, {invalid_content_type, ContentType}}
     end;
 encode_data(undefined, Data) when is_binary(Data) ->
-    {<<"text/plain">>, Data};
+    {ok, {<<"text/plain">>, Data}};
 encode_data(ContentType, Data) when is_binary(Data) ->
-    {ContentType, Data}.
+    {ok, {ContentType, Data}}.
 
 -spec get_request(http_event()) -> http_req().
 get_request(#http_event{request = Req}) ->

@@ -125,7 +125,7 @@ send_return(Success, #msgstate{payload = Payload, headers = OrgHeaders, errors =
     RoutingKey = proplists:get_value(routing_key, AppResponse),
     Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
     AmqpHeaders = [{<<"x-qpush-success">>, bool, Success},
-                   {<<"x-qpush-error">>, array,
+                   {<<"x-qpush-errors">>, array,
                     lists:map(fun (E) ->
                                       {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
                               end,

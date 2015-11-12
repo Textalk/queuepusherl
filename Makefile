@@ -1,10 +1,9 @@
 PROJECT = queuepusherl
 PROJECT_DESCRIPTION = Micro-service for doing HTTP and SMTP requests.
-PROJECT_VERSION = 0.2.0
-RABBITMQ_CLIENT_PATCH = 1
+PROJECT_REGISTERED = qpusherl_app
+PROJECT_VERSION = 0.3.0
 LOCAL_DEPS = inets ssl
 DEPS = lager cowlib jiffy gen_smtp amqp_client
-#DEPS = lager gun jiffy gen_smtp amqp_client
 TEST_DEPS = meck
 
 CT_OPTS = -ct_hooks queuepusherl_ct_hook []
@@ -13,3 +12,9 @@ ERLC_OPTS += ${EXTRA_ERLC_OPTS}
 TEST_ERLC_OPTS += ${EXTRA_ERLC_OPTS}
 
 include erlang.mk
+
+help::
+	$(verbose) printf "%s\n" "" \
+		"Release configuration:" \
+		"Specify release config by setting the environmental variable REL to one of" \
+		"'test', 'stage' or 'production'."
