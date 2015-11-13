@@ -97,7 +97,7 @@ url_encode(List) ->
 encode_data(ContentType, Data) when is_map(Data) ->
     case ContentType of
         <<"application/json">> ->
-            {ok, {ContentType, jiffy:encode(maps:to_list(Data))}};
+            {ok, {ContentType, jiffy:encode(Data)}};
         _ when ContentType == undefined; ContentType == <<"application/x-www-form-urlencoded">> ->
             case url_encode(Data) of
                 {ok, Data0} -> {ok, {<<"application/x-www-form-urlencoded">>, Data0}};

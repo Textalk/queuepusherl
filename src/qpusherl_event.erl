@@ -41,7 +41,7 @@ parse(BinaryEvent, Config) ->
         _:Reason1 ->
             {Explaination, Trace} = extend_error(Reason1, erlang:get_stacktrace()),
             lager:debug("Error logged: ~p", [Trace]),
-            {error, Reason1, Explaination}
+            {error, {Reason1, Explaination}}
     end.
 
 extend_error(function_clause = Reason, [{Mod, Fun, Args, [{file, File}, {line, Line}]}|Tail]) ->
