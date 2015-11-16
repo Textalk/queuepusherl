@@ -124,15 +124,15 @@ send_return(Success, #msgstate{payload = Payload, headers = OrgHeaders, errors =
     Exchange = proplists:get_value(exchange, AppResponse),
     RoutingKey = proplists:get_value(routing_key, AppResponse),
     Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
-    AmqpHeaders = [{<<"x-qpush-success">>, bool, Success},
-                   {<<"x-qpush-error">>, array,
-                    lists:map(fun (E) ->
-                                      {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
-                              end,
-                              [Errors])}],
+    ResultHeader = [{<<"x-qpush-success">>, bool, Success},
+                    {<<"x-qpush-error">>, array,
+                     lists:map(fun (E) ->
+                                       {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
+                               end,
+                               [Errors])}],
     Props = #'P_basic'{
                delivery_mode = 2,
-               headers = OrgHeaders ++ AmqpHeaders
+               headers = OrgHeaders ++ ResultHeader
               },
     Msg = #amqp_msg{props = Props, payload = Payload},
     amqp_channel:cast(Channel, Publish, Msg),
