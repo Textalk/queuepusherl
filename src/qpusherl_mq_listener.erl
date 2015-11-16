@@ -128,15 +128,15 @@ send_return(Success, #msgstate{payload = Payload,
     Exchange = proplists:get_value(exchange, AppResponse),
     RoutingKey = proplists:get_value(routing_key, AppResponse),
     Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
-    AmqpHeaders = [{<<"x-qpush-success">>, bool, Success},
-                   {<<"x-qpush-errors">>, array,
-                    lists:map(fun (E) ->
-                                      {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
-                              end,
-                              [Errors])}],
+    ResultHeader = [{<<"x-qpush-success">>, bool, Success},
+                    {<<"x-qpush-errors">>, array,
+                     lists:map(fun (E) ->
+                                       {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
+                               end,
+                               [Errors])}],
     Props = #'P_basic'{
                delivery_mode = 2,
-               headers = OrgHeaders ++ AmqpHeaders
+               headers = OrgHeaders ++ ResultHeader
               },
     Msg = #amqp_msg{props = Props,
                     payload = case Success of
@@ -403,8 +403,7 @@ setup_subscription(Channel, #subscription_info{queue = Queue,
                                                dlx_ttl = DeadletterTTL,
                                                routing_key = RoutingKey,
                                                subscribe = Subscribe
-                                              } = SubInfo) ->
-    lager:debug("Setting up queue: ~p", [SubInfo]),
+                                              }) ->
     ExchDecl = #'exchange.declare'{exchange = Exchange,
                                    durable = DurableE,
                                    type = ExchangeType},
@@ -422,7 +421,6 @@ setup_subscription(Channel, #subscription_info{queue = Queue,
     if
         Subscribe ->
             Subscription = #'basic.consume'{queue = Queue},
-            lager:debug("Subscribe to queue: ~p", [Queue]),
             #'basic.consume_ok'{consumer_tag = Tag} = amqp_channel:subscribe(Channel,
                                                                              Subscription,
                                                                              self()),
