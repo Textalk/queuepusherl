@@ -23,7 +23,8 @@
           retries = 0  :: non_neg_integer(),
           payload      :: binary(),
           headers = [] :: term(),
-          errors = []  :: [{atom(), binary()}]
+          errors = []  :: [{atom(), binary()}],
+          results = [] :: [binary()]
          }).
 -type msgstate() :: #msgstate{}.
 
@@ -117,7 +118,10 @@ reject_event(#msgstate{tag = Tag} = MsgState, State) ->
 %% -spec send_return(#msgstate{}, #state{}) -> #state{}.
 %% send_return(#msgstate{payload = Payload, errors = Errors},
 %%           #state{channel = {Channel, _}} = State) ->
-send_return(Success, #msgstate{payload = Payload, headers = OrgHeaders, errors = Errors},
+send_return(Success, #msgstate{payload = Payload,
+                               headers = OrgHeaders,
+                               errors = Errors,
+                               results = Results},
             #state{channel = {Channel, _}} = State0) ->
     lager:info("Sending return-event to message queue", []),
     AppResponse = get_config(rabbitmq_response, State0),
@@ -125,7 +129,7 @@ send_return(Success, #msgstate{payload = Payload, headers = OrgHeaders, errors =
     RoutingKey = proplists:get_value(routing_key, AppResponse),
     Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
     ResultHeader = [{<<"x-qpush-success">>, bool, Success},
-                    {<<"x-qpush-error">>, array,
+                    {<<"x-qpush-errors">>, array,
                      lists:map(fun (E) ->
                                        {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
                                end,
@@ -134,7 +138,13 @@ send_return(Success, #msgstate{payload = Payload, headers = OrgHeaders, errors =
                delivery_mode = 2,
                headers = OrgHeaders ++ ResultHeader
               },
-    Msg = #amqp_msg{props = Props, payload = Payload},
+    Msg = #amqp_msg{props = Props,
+                    payload = case Success of
+                                  true ->
+                                      jiffy:encode(Results);
+                                  false ->
+                                      Payload
+                              end},
     amqp_channel:cast(Channel, Publish, Msg),
     State0.
 
@@ -170,7 +180,7 @@ handle_info({'DOWN', _MRef, process, Worker, Reason}, State = #state{}) ->
             State3 = remove_worker(Worker, State2), % Remove worker without retireing
             {noreply, State3}
     end;
-handle_info({worker_finished, {Worker, Error}}, #state{} = State) ->
+handle_info({worker_finished, {fail, Worker, Error}}, #state{} = State) ->
     %% Event failed!
     State1 = case get_worker_event(Worker, State) of
                  {ok, #msgstate{retries = 0} = MsgState} ->
@@ -189,13 +199,14 @@ handle_info({worker_finished, {Worker, Error}}, #state{} = State) ->
                      State
              end,
     {noreply, retire_worker(Worker, State1)};
-handle_info({worker_finished, Worker}, #state{} = State) ->
+handle_info({worker_finished, {success, Worker, Result}}, #state{} = State) ->
     State1 = case get_worker_event(Worker, State) of
                  {ok, MsgState} ->
-                     %% Event finished!
+                     %% Event completed!
                      lager:info("Worker finished (~p)", [Worker]),
-                     State2 = send_return(true, MsgState, State),
-                     State3 = ack_event(MsgState, State2),
+                     MsgState1 = add_result(MsgState, Result),
+                     State2 = send_return(true, MsgState1, State),
+                     State3 = ack_event(MsgState1, State2),
                      Worker ! stop,
                      retire_worker(Worker, State3);
                  error ->
@@ -252,7 +263,7 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
                     {ok, Worker} = create_worker(Tag, Event, State),
                     State1 = add_event(MsgState, State),
                     {noreply, store_worker(Worker, Tag, State1)};
-                {error, Reason, Message} ->
+                {error, {Reason, Message}} ->
                     lager:error("Invalid qpusherl message:~n"
                                 "Payload: ~p~n"
                                 "Reason: ~p~n",
@@ -522,3 +533,5 @@ remove_event(Tag, #state{events = Events} = State) ->
 add_error(#msgstate{errors = Errors} = MsgState, Error) ->
     MsgState#msgstate{errors = [Error|Errors]}.
 
+add_result(#msgstate{results = Results} = MsgState, Result) ->
+    MsgState#msgstate{results = [Result | Results]}.

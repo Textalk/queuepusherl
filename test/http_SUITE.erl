@@ -86,7 +86,7 @@ process_request_success(_Config) ->
                            data => <<>>,
                            require_success => false,
                            url => <<"http://localhost/?foo=bar">>}},
-    ?assertEqual(ok, qpusherl_http_worker:process_event(Event)),
+    ?assertMatch({ok, #{}}, qpusherl_http_worker:process_event(Event)),
     %meck:validate(httpc),
     meck:unload(httpc),
     ok.
@@ -103,7 +103,7 @@ process_request_fail(_Config) ->
                            data => <<>>,
                            require_success => false,
                            url => <<"http://localhost/?foo=bar">>}},
-    ?assertEqual({error, connection_failed, {could_not_connect, <<>>}},
+    ?assertEqual({error, {connection_failed, {could_not_connect, <<>>}}},
                  qpusherl_http_worker:process_event(Event)),
     %meck:validate(httpc),
     meck:unload(httpc),

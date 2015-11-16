@@ -7,3 +7,6 @@ logs/
 *.beam
 .erlang.mk/
 ebin/
+
+rel/production.config
+rel/stage.config

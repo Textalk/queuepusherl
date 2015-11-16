@@ -236,7 +236,7 @@ deliver_http_test_success(_Config) ->
                   #{}, #{},
                   _, _}, State1),
     case maps:find(Tag, Events) of
-        {ok, MsgState} -> ?assertMatch({msgstate, Tag, 2, _, _, []}, MsgState)
+        {ok, MsgState} -> ?assertMatch({msgstate, Tag, 2, _, _, [], _}, MsgState)
     end,
 
     ?assert(meck:validate(qpusherl_worker_sup)),
@@ -258,7 +258,7 @@ retry_event(_Config) ->
     State0 = {state,
               {fake_connection, connM},
               {fake_channel, chanM},
-              #{0 => {msgstate, 0, 3, <<"fake payload">>, [], []}},
+              #{0 => {msgstate, 0, 3, <<"fake payload">>, [], [], []}},
               maps:from_list([{Worker, 0}]),
               sets:new(),
               ?RABBITMQ_CONFIGS
@@ -276,7 +276,10 @@ retry_event(_Config) ->
                         ok
                 end),
 
-    {noreply, State1} = qpusherl_mq_listener:handle_info({worker_finished, Worker}, State0),
+    {noreply, State1} = qpusherl_mq_listener:handle_info(
+                          {worker_finished, {success, Worker, <<"Fake success">>}},
+                          State0
+                         ),
 
     ?assertMatch({state, _, _, #{}, #{}, _, _}, State1),
 
@@ -285,7 +288,7 @@ retry_event(_Config) ->
     State2 = {state,
               {fake_connection, connM},
               {fake_channel, chanM},
-              #{1 => {msgstate, 1, 0, <<"fake payload">>, [], []}},
+              #{1 => {msgstate, 1, 0, <<"fake payload">>, [], [], []}},
               maps:from_list([{Worker, 1}]),
               sets:new(),
               ?RABBITMQ_CONFIGS
@@ -310,8 +313,10 @@ retry_event(_Config) ->
                         ok
                 end),
 
-    {noreply, State3} = qpusherl_mq_listener:handle_info({worker_finished, {Worker, fake_error}},
-                                                         State2),
+    {noreply, State3} = qpusherl_mq_listener:handle_info(
+                          {worker_finished, {fail, Worker, fake_error}},
+                          State2
+                         ),
     {state, _, _, Events, Workers, _, _} = State3,
     ?assertEqual(#{}, Events),
     ?assertEqual(#{}, Workers),

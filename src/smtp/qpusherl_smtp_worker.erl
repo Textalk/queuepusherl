@@ -26,11 +26,12 @@ send_mail(Event) ->
     %end.
     case gen_smtp_client:send_blocking(Mail, Smtp) of
         Receipt when is_binary(Receipt) ->
-            ok;
+            {ok, #{<<"Receipt">> => Receipt,
+                   <<"Message">> => <<"SMTP request finished">>}};
         {error, Type, Message} ->
-            {error, Type, Message};
+            {error, {Type, Message}};
         {error, Reason} ->
-            {error, unknown_error, Reason}
+            {error, {unknown_error, Reason}}
     end.
 
 send_error_mail(Event, Errors) ->

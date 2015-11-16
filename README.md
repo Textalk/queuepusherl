@@ -12,7 +12,11 @@ Queuepusherl uses two exchanges:
   * `qpush.exchange` - Used for receiving messages and returning error reports.
     * `qpush.queue.work` - This is the queue where messages posted to
       `qpush.exchange` with the key `queuepush` will end up.
-    * `qpush.queue.response` - Failed requests are posted to this queue.
+    * `qpush.queue.response` - Responses to a request is sent on this queue, in
+                               the case of a success the response will be a list
+                               of positive results, if it's a failure it will
+                               contain the request itself and store the errors
+                               in the header `x-qpush-errors`.
   * `qpush.dlx` - This is a dead-letter exchange just for internal use, it is
     used to delay requeuing of messages if they fail.
 
@@ -75,7 +79,7 @@ A simple HTTP POST to `http://example.com` with the body set to `foo=bar`.
       "url": "http://example.com",
       "require-success": true,
       "extra-headers": {},
-      "content-type": "application/x-www-form-encoded",
+      "content-type": "application/x-www-form-urlencoded",
       "data": {
         "foo": "bar"
       }
@@ -83,3 +87,8 @@ A simple HTTP POST to `http://example.com` with the body set to `foo=bar`.
   }
 }
 ```
+
+Versioning
+----------
+
+Queuepusherl intends to employs [Semantic Versioning 2.0.0](http://semver.org/spec/v2.0.0.html)

@@ -1,0 +1,14 @@
+%% vim: ft=erlang tw=100:
+Config0 = CONFIG,
+ReleaseType = case os:getenv("REL") of
+		      Test when Test == false; Test == "test" -> test;
+		      "stage" -> stage;
+		      "production" -> production
+	      end,
+
+io:format("Building ~p release~n", [ReleaseType]),
+
+Config1 = lists:keystore(sys_config, 1, Config0,
+			 {sys_config, "./rel/" ++ atom_to_list(ReleaseType) ++ ".config"}),
+
+Config1.
