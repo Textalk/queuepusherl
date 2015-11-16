@@ -6,7 +6,9 @@ Session.vim
 logs/
 *.beam
 .erlang.mk/
+erlang.mk
 ebin/
+queuepusherl.d
 
 rel/production.config
 rel/stage.config
