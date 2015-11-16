@@ -193,10 +193,14 @@ handle_info({worker_finished, {fail, Worker, Error}}, #state{} = State) ->
                      lager:info("Worker failed with ~p more retries (~p)",
                                 [AttemptsLeft, Worker]),
                      MsgState1 = add_error(MsgState, Error),
-                     queue_retry_event(MsgState1, State);
-                 error ->
-                     lager:error("Could not match an event to the worker (~p)", [Worker]),
-                     State
+                     queue_retry_event(MsgState1, State)
+                 %%%% The following case should never be able to happen if the application is
+                 %%%% otherwise correct. It would mean that a worker died without this process
+                 %%%% having been notified.
+                 %% error ->
+                 %%     lager:error("Internal error: Could not match an event to the worker (~p)",
+                 %%                 [Worker]),
+                 %%     State
              end,
     {noreply, retire_worker(Worker, State1)};
 handle_info({worker_finished, {success, Worker, Result}}, #state{} = State) ->
@@ -264,10 +268,10 @@ handle_info({#'basic.deliver'{delivery_tag = Tag},
                     State1 = add_event(MsgState, State),
                     {noreply, store_worker(Worker, Tag, State1)};
                 {error, {Reason, Message}} ->
-                    lager:error("Invalid qpusherl message:~n"
-                                "Payload: ~p~n"
-                                "Reason: ~p~n",
-                                [Payload, Reason]),
+                    lager:warning("Invalid qpusherl message:~n"
+                                  "Payload: ~p~n"
+                                  "Reason: ~p~n",
+                                  [Payload, Reason]),
                     MsgState1 = add_error(MsgState, {Reason, Message}),
                     State1 = reject_event(MsgState1, State),
                     {noreply, State1};
@@ -407,7 +411,7 @@ setup_subscription(Channel, #subscription_info{queue = Queue,
     #'exchange.declare_ok'{} = amqp_channel:call(Channel, ExchDecl),
 
     Args = [{<<"x-dead-letter-exchange">>, longstr, Deadletter} || Deadletter /= undefined] ++
-    [{<<"x-message-ttl">>, signedint, DeadletterTTL} || DeadletterTTL /= undefined],
+           [{<<"x-message-ttl">>, signedint, DeadletterTTL} || DeadletterTTL /= undefined],
 
     QueueDecl = #'queue.declare'{queue = Queue, durable = DurableQ, arguments = Args},
     #'queue.declare_ok'{} = amqp_channel:call(Channel, QueueDecl),
