@@ -22,7 +22,7 @@
           tag          :: rabbitmq_tag(),
           retries = 0  :: non_neg_integer(),
           payload      :: binary(),
-          headers = [] :: term(),
+          headers = [] :: list(term()),
           errors = []  :: [{atom(), binary()}],
           results = [] :: [binary()]
          }).
@@ -48,20 +48,20 @@ start_link() ->
 
 init([]) ->
     lager:info("Message queue listener started!"),
-    Get = fun (Key) ->
-                  {ok, Value} = application:get_env(queuepusherl, Key),
-                  {Key, Value}
-          end,
-    Config = [Get(rabbitmq_response),
-              Get(rabbitmq_work),
-              Get(rabbitmq_retry),
-              Get(rabbitmq_routing_key),
-              Get(rabbitmq_configs),
-              Get(rabbitmq_reconnect_timeout),
-              Get(event_attempt_count),
-              Get(error_from),
-              Get(error_smtp)
-             ],
+    Config = lists:map(
+               fun (Key) -> {ok, Value} = application:get_env(queuepusherl, Key), {Key, Value} end,
+               [
+                rabbitmq_response,
+                rabbitmq_work,
+                rabbitmq_retry,
+                rabbitmq_routing_key,
+                rabbitmq_configs,
+                rabbitmq_reconnect_timeout,
+                event_attempt_count,
+                error_from,
+                error_smtp
+               ]
+              ),
     self() ! connect,
     {ok, #state{config = Config}}.
 
@@ -91,7 +91,7 @@ handle_cast(_Msg, State) ->
 -spec ack_event(#msgstate{}, #state{}) -> #state{}.
 ack_event(#msgstate{tag = Tag}, #state{channel = {Channel, _}} = State) ->
     Ack = #'basic.ack'{delivery_tag = Tag},
-    amqp_channel:call(Channel, Ack),
+    ok = amqp_channel:call(Channel, Ack),
     State.
 
 %% @doc Move the event to the retry queue
@@ -305,7 +305,7 @@ create_worker(Tag, Event, #state{config = _Config}) ->
     {ok, Worker} = qpusherl_worker_sup:create_child(self(), Event),
     lager:debug("Started new worker! (~p :: ~p)", [Tag, Worker]),
     monitor(process, Worker),
-    Worker ! execute,
+    Worker ! execute, %% Start execution of the worker.
     {ok, Worker}.
 
 %% Connect to any of the RabbitMQ servers

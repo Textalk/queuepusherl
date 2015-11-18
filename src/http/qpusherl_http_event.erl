@@ -35,7 +35,7 @@ build_request(EventData) ->
       <<"query">> := InQuery,
       <<"data">> := InData,
       <<"url">> := InURL} = maps:merge(Defaults, EventData),
-    Method = erlang:list_to_atom(string:to_lower(unicode:characters_to_list(InMethod))),
+    Method = erlang:list_to_existing_atom(string:to_lower(unicode:characters_to_list(InMethod))),
     URLparts = case http_uri:parse(unicode:characters_to_list(InURL), [{fragment, true}]) of
                    {ok, {Schema, UserInfo, Host, Port, Path, UrlQuery, UrlFragment}} ->
                        ExpectedPort = case Schema of
@@ -47,7 +47,7 @@ build_request(EventData) ->
                         unicode:characters_to_binary(Host),
                         case Port of
                             ExpectedPort -> <<>>;
-                            _ -> unicode:characters_to_binary(io_lib:format("~p", [Port]))
+                            _ -> integer_to_binary(Port)
                         end,
                         unicode:characters_to_binary(Path),
                         case UrlQuery of
@@ -117,16 +117,10 @@ get_request(#http_event{request = Req}) ->
 
 format_url({Schema, User, Host, Port, Path, QueryList, Fragment}) ->
     Query = cow_qs:qs(QueryList),
-    binary_join([Schema, <<"://">>] ++
-                [<<User/binary, "@">> || User /= <<>>] ++
-                [Host] ++
-                [<<":", Port/binary>> || Port /= <<>>] ++
-                [Path] ++
-                [<<"?", Query/binary>> || Query /= <<>>] ++
-                [<<"#", Fragment/binary>> || Fragment /= <<>>]).
-
--spec binary_join([binary()]) -> binary().
-binary_join([]) ->
-    <<>>;
-binary_join([Part|Rest]) ->
-    <<Part/binary, (binary_join(Rest))/binary>>.
+    iolist_to_binary([Schema, <<"://">>] ++
+                     [<<User/binary, "@">> || User /= <<>>] ++
+                     [Host] ++
+                     [<<":", Port/binary>> || Port /= <<>>] ++
+                     [Path] ++
+                     [<<"?", Query/binary>> || Query /= <<>>] ++
+                     [<<"#", Fragment/binary>> || Fragment /= <<>>]).

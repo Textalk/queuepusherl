@@ -28,7 +28,7 @@ process_event(Event) ->
         {ok, Result} ->
             case Result of
                 {{_HTTP, StatusCode, StatusText}, _Headers, Body}
-                    when StatusCode >= 200, StatusCode < 300 ->
+                  when StatusCode >= 200, StatusCode < 300 ->
                     CapBody = ellipsis_string(unicode:characters_to_binary(Body), 28),
                     lager:notice("Got success response (~p): ~s -> ~s", [self(), StatusText, CapBody]),
                     %lager:debug("Whole response: ~p", [Result]),

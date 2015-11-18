@@ -4,6 +4,7 @@ deps/
 relx
 Session.vim
 logs/
+test/ct.cover.spec
 *.beam
 .erlang.mk/
 erlang.mk
