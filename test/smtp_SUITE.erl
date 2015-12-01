@@ -75,11 +75,11 @@ parse(_Config) ->
                    <<"<admin@localhost>">>,
                    [<<"<foo@example.com>">>],
                    _},
-                  {smtp,
-                   <<"smtp.localdomain">>,
-                   25,
-                   <<"username">>,
-                   <<"password">>},
+                  [{smtp,
+                    <<"smtp.localdomain">>,
+                    25,
+                    <<"username">>,
+                    <<"password">>}],
                   {mailerror,
                    <<"Email <user@localhost>">>,
                    <<"admin@no.host">>,
@@ -89,7 +89,7 @@ parse(_Config) ->
                  }, SmtpEvent),
     ?assertMatch({<<"<admin@localhost>">>, [<<"<foo@example.com>">>], _Mail}, qpusherl_smtp_event:get_mail(SmtpEvent)),
     ?assertMatch({_FromMail, _ToAddress, _Mail}, qpusherl_smtp_event:get_error_mail(SmtpEvent, [])),
-    ?assertMatch([{relay, _}, {port, _}, {username, _}, {password, _}],
+    ?assertMatch([[{relay, _}, {port, _}, {username, _}, {password, _}]],
                  qpusherl_smtp_event:get_smtp_options(SmtpEvent)),
     ok.
 
@@ -138,7 +138,7 @@ simple_mail_1(_Config) ->
      },
     {ok, {smtp_event,
           {mail, From, To, Mail},
-          {smtp, SMTPRelay, _Port, _Username, _Password},
+          [{smtp, SMTPRelay, _Port, _Username, _Password}],
           {mailerror, ErrorTo, _ErrorFrom, ErrorSubject, ErrorMsg, undefined}
          }
     } = qpusherl_smtp_event:parse(TestMail, ?DEFAULT_PARSE_OPTS),

@@ -23,7 +23,7 @@
           retries = 0  :: non_neg_integer(),
           payload      :: binary(),
           headers = [] :: list(term()),
-          errors = []  :: [{atom(), binary()}],
+          errors = []  :: list(),
           results = [] :: [binary()]
          }).
 -type msgstate() :: #msgstate{}.
@@ -128,12 +128,15 @@ send_return(Success, #msgstate{payload = Payload,
     Exchange = proplists:get_value(exchange, AppResponse),
     RoutingKey = proplists:get_value(routing_key, AppResponse),
     Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
+    FormattedErrors = if length(Errors) > 0 ->
+                           lists:map(fun (E) ->
+                                         {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
+                                     end,
+                                     Errors);
+                         true -> []
+                      end,
     ResultHeader = [{<<"x-qpush-success">>, bool, Success},
-                    {<<"x-qpush-errors">>, array,
-                     lists:map(fun (E) ->
-                                       {longstr, erlang:list_to_binary(io_lib:format("~p", [E]))}
-                               end,
-                               [Errors])}],
+                    {<<"x-qpush-errors">>, array, FormattedErrors}],
     Props = #'P_basic'{
                delivery_mode = 2,
                headers = OrgHeaders ++ ResultHeader

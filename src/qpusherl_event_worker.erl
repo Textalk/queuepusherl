@@ -59,12 +59,10 @@ handle_info(execute, State = #state{closed = false, owner = Owner}) ->
             Owner ! {worker_finished, {success, self(), Result}},
             lager:debug("Event completed! (~p)", [self()]),
             {noreply, State1#state{closed = true}};
-        {retry, Error, State1 = #state{}} ->
+        {retry, {error, Error}, State1 = #state{}} ->
             Owner ! {worker_finished, {fail, self(), Error}},
             {noreply, State1#state{closed = true}}
     end;
-handle_info({failed, Errors}, State) ->
-    fail_event(State, Errors);
 handle_info(stop, State = #state{closed = true}) ->
     {stop, normal, State};
 handle_info({stop, Errors}, State) ->
@@ -80,14 +78,14 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
--spec execute_event(state()) -> {'done', maps:map(), state()}  | {'retry', state()}.
+-spec execute_event(state()) -> {'done', maps:map(), state()}  | {'retry', {error, list()}, state()}.
 execute_event(#state{event = Event, callback = Callback} = State) ->
     case Callback:process_event(Event) of
         {ok, Result} ->
             {done, Result, State};
-        {error, {Reason, Description}} ->
-            lager:warning("Event failed (~p): ~p", [self(), Reason]),
-            {retry, {Reason, Description}, State}
+        {error, Errors} ->
+            lager:warning("Event failed (~p): ~p", [self(), Errors]),
+            {retry, {error, Errors}, State}
     end.
 
 -spec fail_event(state(), [tuple()]) -> ok.

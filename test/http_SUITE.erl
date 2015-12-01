@@ -92,9 +92,10 @@ process_request_success(_Config) ->
     ok.
 
 process_request_fail(_Config) ->
+    URL = "http://localhost/?foo=bar",
     meck:new(httpc, []),
-    meck:expect(httpc, request, fun(get, {"http://localhost/?foo=bar", []},
-                                    _HttpOptions, _Options) ->
+    meck:expect(httpc, request, fun(get, {URLin, []},
+                                    _HttpOptions, _Options) when URLin =:= URL ->
                                         {error, {could_not_connect, <<>>}}
                                 end),
     Event = {http_event, #{method => get,
@@ -102,8 +103,8 @@ process_request_fail(_Config) ->
                            content_type => <<>>,
                            data => <<>>,
                            require_success => false,
-                           url => <<"http://localhost/?foo=bar">>}},
-    ?assertEqual({error, {connection_failed, {could_not_connect, <<>>}}},
+                           url => iolist_to_binary(URL)}},
+    ?assertMatch({error, [{{get, URL}, {connection_failed, {could_not_connect, <<>>}}}]},
                  qpusherl_http_worker:process_event(Event)),
     %meck:validate(httpc),
     meck:unload(httpc),

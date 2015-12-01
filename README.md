@@ -23,8 +23,8 @@ Queuepusherl uses two exchanges:
 Message format
 --------------
 
-The message format is fully described in `priv/schema/push_message.schema` but
-here are two examples for clarity:
+The message format is fully described in `priv/schema/push_message.schema` and
+exemplified below:
 
 E-mail with text and html alternatives. In case the message can't be sent it
 will be sent to "admin@example.com" instead with the error body as message.
@@ -88,7 +88,32 @@ A simple HTTP POST to `http://example.com` with the body set to `foo=bar`.
 }
 ```
 
+Message Format - SMTP
+=====================
+
+An SMTP message needs to contain a `mail` and `smtp` value. In the case where
+there are no `error` value no SMTP request will be done if the primary message
+could not be sent.
+
+As for the `body` of the message it can contain either a simple string that will
+be processed as a `text/plain` unless another `content-type` is explicitly
+specified. If there is a list of bodies each sub-body can, recursively, contain
+either a string or a list of sub-bodies. And unless otherwise specified the
+`content-type` will be assumed to be `multipart/mixed`.
+
+Important to note is that the `to`, `cc` and `bcc` fields for the primary
+message needs to be a list of addresses while the `from` field is only allowed
+to be one address.
+
+In the case of multiple SMTPs specified for the primary message these will all
+be tried in order until one of them succeeds. This means that if the first SMTP
+relay isn't accessible for some reason the second one will be attempted and so
+on.
+
 Versioning
 ----------
 
-Queuepusherl intends to employs [Semantic Versioning 2.0.0](http://semver.org/spec/v2.0.0.html)
+Queuepusherl intends to employs
+[Semantic Versioning 2.0.0](http://semver.org/spec/v2.0.0.html)
+
+// vim: tw=80: ft=markdown

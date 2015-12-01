@@ -22,32 +22,37 @@ process_event(Event) ->
                   _ ->
                       {SUrl, LHeaders, SContentType, Data}
               end,
-    case httpc:request(Method, ReqData, [], []) of
-        %% {ok, saved_to_file} ->
-        %%     {ok, #{<<"Message">> => <<"Saved to file">>}};
-        {ok, Result} ->
-            case Result of
-                {{_HTTP, StatusCode, StatusText}, _Headers, Body}
-                  when StatusCode >= 200, StatusCode < 300 ->
-                    CapBody = ellipsis_string(unicode:characters_to_binary(Body), 28),
-                    lager:notice("Got success response (~p): ~s -> ~s", [self(), StatusText, CapBody]),
-                    %lager:debug("Whole response: ~p", [Result]),
-                    {ok, #{<<"StatusCode">> => StatusCode,
-                           <<"StatusText">> => StatusText,
-                           <<"Body">> => Body}};
-                {{_HTTP, StatusCode, StatusText}, _Headers, Body} ->
-                    lager:warning("Got failed response ~p (~p) (~p)",
-                                  [StatusText, StatusCode, self()]),
-                    if
-                        RequireSuccess -> {error, {failed_response, StatusText}};
-                        true -> {ok, #{<<"StatusCode">> => StatusCode,
-                                       <<"StatusText">> => StatusText,
-                                       <<"Body">> => Body}}
-                    end
-            end;
-        {error, Reason} ->
-            lager:info("Could not perform HTTP request (~p): ~p", [self(), Reason]),
-            {error, {connection_failed, Reason}}
+    Result0 = case httpc:request(Method, ReqData, [], []) of
+                  %% {ok, saved_to_file} ->
+                  %%     {ok, #{<<"Message">> => <<"Saved to file">>}};
+                  {ok, Result} ->
+                      case Result of
+                          {{_HTTP, StatusCode, StatusText}, _Headers, Body}
+                            when StatusCode >= 200, StatusCode < 300 ->
+                              CapBody = ellipsis_string(unicode:characters_to_binary(Body), 28),
+                              lager:notice("Got success response (~p): ~s -> ~s",
+                                           [self(), StatusText, CapBody]),
+                              %lager:debug("Whole response: ~p", [Result]),
+                              {ok, #{<<"StatusCode">> => StatusCode,
+                                     <<"StatusText">> => StatusText,
+                                     <<"Body">> => Body}};
+                          {{_HTTP, StatusCode, StatusText}, _Headers, Body} ->
+                              lager:warning("Got failed response ~p (~p) (~p)",
+                                            [StatusText, StatusCode, self()]),
+                              if
+                                  RequireSuccess -> {error, {failed_response, StatusText}};
+                                  true -> {ok, #{<<"StatusCode">> => StatusCode,
+                                                 <<"StatusText">> => StatusText,
+                                                 <<"Body">> => Body}}
+                              end
+                      end;
+                  {error, Reason} ->
+                      lager:info("Could not perform HTTP request (~p): ~p", [self(), Reason]),
+                      {error, {connection_failed, Reason}}
+              end,
+    case Result0 of
+        {ok, _} -> Result0;
+        {error, Error} -> {error, [{{Method, SUrl}, Error}]}
     end.
 
 fail_event(_Event, _Errors) ->

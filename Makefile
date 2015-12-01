@@ -1,7 +1,7 @@
 PROJECT = queuepusherl
 PROJECT_NAME = queuepusher
 PROJECT_DESCRIPTION = Micro-service for doing HTTP and SMTP requests.
-PROJECT_VERSION = 0.5.0
+PROJECT_VERSION = 0.6.0
 LOCAL_DEPS = inets ssl
 DEPS = lager cowlib jiffy gen_smtp amqp_client
 TEST_DEPS = meck

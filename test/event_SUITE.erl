@@ -166,7 +166,7 @@ execute_http_event_failed(_Config) ->
     {Return, Error} = receive {worker_finished, {fail, X, E}} -> {X, E} end,
     ?assert(is_pid(Return)),
     ?assertMatch({state, _, _, true, _}, State1),
-    ?assertMatch({connection_failed, <<"Test fail">>}, Error),
+    ?assertMatch([{_Source, {connection_failed, <<"Test fail">>}}], Error),
 
     ?assert(meck:validate(httpc)),
     meck:unload(httpc),
@@ -187,7 +187,7 @@ execute_smtp_event_failed(_Config) ->
     {Return, Error} = receive {worker_finished, {fail, Y, E}} -> {Y, E} end,
     ?assert(is_pid(Return)),
     ?assertMatch({state, _, _, true, _}, State1),
-    ?assertMatch({test_error, <<"Test error">>}, Error),
+    ?assertMatch([{_Source, {test_error, <<"Test error">>}}], Error),
 
     ?assert(meck:validate(gen_smtp_client)),
 
