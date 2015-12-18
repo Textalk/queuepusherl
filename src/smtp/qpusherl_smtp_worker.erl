@@ -53,13 +53,10 @@ send_mail_(Mail, [SMTP | Rest]) ->
 send_error_mail(Event, Errors) ->
     ErrorMail = qpusherl_smtp_event:get_error_mail(Event, Errors),
     ErrorSmtp = qpusherl_smtp_event:get_error_smtp(Event),
-    case {ErrorMail, ErrorSmtp} of
-        {undefined, undefined} ->
-            ok;
-        {_, _} ->
-            lager:debug("send_error_mail(#state{event = ~p})~nErrorMail: ~p~nErrorSmtp: ~p~n", [Event,
-                                                                                                ErrorMail,
-                                                                                                ErrorSmtp]),
+    if ErrorMail == undefined orelse ErrorSmtp == undefined -> ok;
+       true -> lager:debug("send_error_mail(#state{event = ~p})~n"
+                           "ErrorMail: ~p~n"
+                           "ErrorSmtp: ~p", [Event, ErrorMail, ErrorSmtp]),
             case gen_smtp_client:send_blocking(ErrorMail, ErrorSmtp) of
                 Receipt when is_binary(Receipt) ->
                     ok;
