@@ -41,8 +41,8 @@
 
 -record(smtp_event, {
           mail  :: mail(),
-          smtp  :: smtp(),
-          error :: mailerror()}).
+          smtps :: [smtp()],
+          error :: mailerror() | 'undefined'}).
 -opaque smtp_event() :: #smtp_event{}.
 -export_type([smtp_event/0]).
 
@@ -50,14 +50,21 @@
 parse(EventInfo, State) ->
     MailInfo = maps:get(<<"mail">>, EventInfo),
     SmtpInfo = maps:get(<<"smtp">>, EventInfo),
-    MailErrorInfo = maps:get(<<"error">>, EventInfo),
-    ErrorFrom = qpusherl_event:get_config(error_from, State),
-    ErrorSmtp = qpusherl_event:get_config(error_smtp, State),
+    MailErrorInfo = maps:get(<<"error">>, EventInfo, undefined),
     Mail = parse_mail(MailInfo),
-    Smtp = parse_smtp(SmtpInfo),
-    Error = parse_error(MailErrorInfo#{<<"from">> => ErrorFrom, <<"smtp">> => ErrorSmtp}),
+    Smtps = case is_list(SmtpInfo) of
+                true -> [parse_smtp(Info) || Info <- SmtpInfo];
+                false -> [parse_smtp(SmtpInfo)]
+            end,
+    Error = case MailErrorInfo of
+                undefined -> undefined;
+                _ -> 
+                    ErrorFrom = qpusherl_event:get_config(error_from, State),
+                    ErrorSmtp = qpusherl_event:get_config(error_smtp, State),
+                    parse_error(MailErrorInfo#{<<"from">> => ErrorFrom, <<"smtp">> => ErrorSmtp})
+            end,
     {ok, #smtp_event{mail = Mail,
-                     smtp = Smtp,
+                     smtps = Smtps,
                      error = Error}}.
 
 parse_header_with_params(FieldValue) ->
@@ -243,10 +250,14 @@ parse_error(ErrorInfo) ->
     true = is_binary(Body),
     #mailerror{to = To, from = From, subject = Subject, body = Body, smtp = Smtp}.
 
+get_error_smtp(#smtp_event{error = undefined}) ->
+    undefined;
 get_error_smtp(#smtp_event{error = #mailerror{smtp = Smtp}}) ->
     Smtp.
 
 -spec get_error_mail(smtp_event(), term()) -> extern_mail().
+get_error_mail(#smtp_event{error = undefined}, _Errors) ->
+    undefined;
 get_error_mail(#smtp_event{mail = {mail, _, _, OrigMail},
                            error = #mailerror{to = To,
                                               from = ErrorFrom,
@@ -279,14 +290,17 @@ get_mail(#smtp_event{mail = {mail, From, To, Body}}) ->
 %% @doc Returns a proplist that can be used as the 2nd argument to
 %% gen_smtp_client:send/2,3 and gen_smtp_client:send_blocking/2.
 -spec get_smtp_options(smtp_event()) -> [{atom(), term()}].
-get_smtp_options(#smtp_event{smtp = #smtp{relay = Relay,
-                                          port = Port,
-                                          username = User,
-                                          password = Password}}) ->
-    [{relay, Relay} || Relay /= undefined] ++
-    [{port, Port}  || Port /= undefined] ++
-    [{username, User} || User /= undefined] ++
-    [{password, Password} || Password /= undefined].
+get_smtp_options(#smtp_event{smtps = SMTPs}) ->
+    lists:map(fun (#smtp{relay = Relay,
+                         port = Port,
+                         username = User,
+                         password = Password}) ->
+                      [{relay, Relay} || Relay /= undefined] ++
+                      [{port, Port}  || Port /= undefined] ++
+                      [{username, User} || User /= undefined] ++
+                      [{password, Password} || Password /= undefined]
+              end,
+              SMTPs).
 
 %% ------------------------------------------------------------------------------------------------
 %% Helper functions
